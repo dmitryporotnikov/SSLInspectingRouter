@@ -14,14 +14,14 @@ The included `setup.sh` script automates the environmental prerequisites. It mod
 sudo ./setup.sh
 ```
 
-If the build succeeds, a binary named `sslrouter` is produced in the project root.
+If the build succeeds, a binary named `sslinspectingrouter` is produced in the project root.
 
 ## Execution
 
 Privileged access is strictly required for both network stack manipulation and binding to the interception logic. Execute the binary as root user.
 
 ```bash
-sudo ./sslrouter
+sudo ./sslinspectingrouter or "go run . "
 ```
 
 Runtime logging provides immediate feedback on intercepted connections. The application listens for `SIGINT` and `SIGTERM` signals. Receiving these signals triggers a graceful shutdown sequence that explicitly flushes the `SSLPROXY` chain from `iptables` and removes the redirection rules, preventing network blackholing after the process exits.
