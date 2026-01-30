@@ -1,4 +1,4 @@
-# SSLProxy
+# SSLInspectingRouter
 
 This repository contains a transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It utilizes the kernel packet filtering framework to redirect web traffic to local userspace listeners.
 
