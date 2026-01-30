@@ -41,5 +41,5 @@ fi
 
 echo "Setup complete."
 echo "Usage:"
-echo "  1. sudo ./sslrouter"
+echo "  1. sudo ./sslinspectingrouter"
 echo "  2. Install 'ca-cert.pem' to trusted root store on clients."

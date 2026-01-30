@@ -16,10 +16,11 @@ import (
 type HTTPSHandler struct {
 	certManager *CertManager
 	client      *http.Client
+	blockList   *BlockList
 }
 
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
-func NewHTTPSHandler(certManager *CertManager) *HTTPSHandler {
+func NewHTTPSHandler(certManager *CertManager, blockList *BlockList) *HTTPSHandler {
 	return &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
@@ -33,6 +34,7 @@ func NewHTTPSHandler(certManager *CertManager) *HTTPSHandler {
 				},
 			},
 		},
+		blockList: blockList,
 	}
 }
 
@@ -51,6 +53,13 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	}
 
 	LogDebug(fmt.Sprintf("SNI hostname: %s", hostname))
+
+	if h.blockList != nil && h.blockList.Matches(hostname) {
+		LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
+		LogTLSRequest(sourceIP, hostname, "TLS SNI")
+		LogHTTPSResponse(sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
+		return
+	}
 
 	certPair, err := h.certManager.GetCertificateForHost(hostname)
 	if err != nil {
@@ -99,7 +108,7 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 
 	fullURL := fmt.Sprintf("https://%s%s", hostname, req.URL.RequestURI())
 
-	LogHTTPSRequest(sourceIP, req.Method, fullURL, req.Header, bodyBytes)
+	LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
 
 	proxyReq, err := http.NewRequest(req.Method, fullURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
@@ -115,14 +124,20 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	if err != nil {
 		LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
+		LogHTTPSResponse(sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
 		return
 	}
 	defer resp.Body.Close()
+
+	preview := &limitedBuffer{max: logBodyLimit()}
+	tee := io.TeeReader(resp.Body, preview)
+	resp.Body = io.NopCloser(tee)
 
 	if err := resp.Write(tlsConn); err != nil {
 		LogError(fmt.Sprintf("Failed to write response to client: %v", err))
 		return
 	}
+	LogHTTPSResponse(sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
 
 	LogDebug(fmt.Sprintf("HTTPS completed: %s %s -> %d", req.Method, fullURL, resp.StatusCode))
 }

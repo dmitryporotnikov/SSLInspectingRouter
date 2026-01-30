@@ -13,13 +13,13 @@ import (
 // even after extractSNI has consumed the ClientHello.
 func TestTLSHandshakeFix(t *testing.T) {
 	// 1. Setup CertManager
-	cm, err := NewCertManager()
+	cm, err := NewCertManager(true)
 	if err != nil {
 		t.Fatalf("Failed to create CertManager: %v", err)
 	}
 
 	// 2. Setup HTTPSHandler
-	handler := NewHTTPSHandler(cm)
+	handler := NewHTTPSHandler(cm, nil)
 
 	// 3. Start a listener to simulate the transparent proxy intercept
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
