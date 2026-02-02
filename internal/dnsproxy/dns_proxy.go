@@ -85,13 +85,14 @@ func (p *DNSProxy) serveUDP(conn net.PacketConn) {
 
 		blocked, qname, qtype := p.analyzeQuery(payload)
 		sourceIP, _, _ := net.SplitHostPort(addr.String())
+		var reqID int64
 		if qname != "" {
-			logger.LogDNSRequest(sourceIP, qname, qtype)
+			reqID = logger.LogDNSRequest(sourceIP, qname, qtype)
 		}
 		if blocked {
 			logger.LogInfo(fmt.Sprintf("Dropped DNS UDP query for %s from %s", qname, addr.String()))
 			if qname != "" {
-				logger.LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
+				logger.LogDNSResponse(reqID, sourceIP, qname, "DNS DROPPED", "Blocked by policy")
 			}
 			continue
 		}
@@ -102,7 +103,7 @@ func (p *DNSProxy) serveUDP(conn net.PacketConn) {
 			continue
 		}
 		if qname != "" {
-			logger.LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
+			logger.LogDNSResponse(reqID, sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
 		}
 
 		if _, err := conn.WriteTo(resp, addr); err != nil {
@@ -143,13 +144,14 @@ func (p *DNSProxy) handleTCP(conn net.Conn) {
 
 	blocked, qname, qtype := p.analyzeQuery(msg)
 	sourceIP, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
+	var reqID int64
 	if qname != "" {
-		logger.LogDNSRequest(sourceIP, qname, qtype)
+		reqID = logger.LogDNSRequest(sourceIP, qname, qtype)
 	}
 	if blocked {
 		logger.LogInfo(fmt.Sprintf("Dropped DNS TCP query for %s from %s", qname, conn.RemoteAddr().String()))
 		if qname != "" {
-			logger.LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
+			logger.LogDNSResponse(reqID, sourceIP, qname, "DNS DROPPED", "Blocked by policy")
 		}
 		return
 	}
@@ -160,7 +162,7 @@ func (p *DNSProxy) handleTCP(conn net.Conn) {
 		return
 	}
 	if qname != "" {
-		logger.LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
+		logger.LogDNSResponse(reqID, sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
 	}
 
 	respLen := len(resp)

@@ -46,18 +46,19 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.blockList != nil && h.blockList.Matches(targetHost) {
-		logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
+		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
 		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s", targetHost, sourceIP))
 		http.Error(w, "Blocked", http.StatusForbidden)
-		logger.LogHTTPResponse(sourceIP, targetHost, "403 Forbidden", http.Header{}, []byte("Blocked"), false)
+		logger.LogHTTPResponse(reqID, sourceIP, targetHost, "403 Forbidden", http.Header{}, []byte("Blocked"), false)
 		return
 	}
 
 	bypassed := h.bypassList != nil && h.bypassList.Matches(targetHost)
+	var reqID int64
 	if bypassed {
-		logger.LogBypassedRequest(sourceIP, targetHost)
+		reqID = logger.LogBypassedRequest(sourceIP, targetHost)
 	} else {
-		logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
+		reqID = logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
 	}
 
 	proxyReq, err := http.NewRequest(r.Method, getFullURL(r), bytes.NewBuffer(bodyBytes))
@@ -65,7 +66,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.LogError(fmt.Sprintf("Failed to create proxy request: %v", err))
 		http.Error(w, "Proxy Error", http.StatusInternalServerError)
 		if bypassed {
-			logger.LogBypassedResponse(sourceIP, targetHost)
+			logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		}
 		return
 	}
@@ -81,9 +82,9 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		if bypassed {
-			logger.LogBypassedResponse(sourceIP, targetHost)
+			logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		} else {
-			logger.LogHTTPResponse(sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+			logger.LogHTTPResponse(reqID, sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
 		}
 		return
 	}
@@ -93,7 +94,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	if bypassed {
 		_, _ = io.Copy(w, resp.Body)
-		logger.LogBypassedResponse(sourceIP, targetHost)
+		logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		logger.LogDebug(fmt.Sprintf("HTTP bypassed: %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 		return
 	}
@@ -102,7 +103,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tee := io.TeeReader(resp.Body, preview)
 	_, _ = io.Copy(w, tee)
 
-	logger.LogHTTPResponse(sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+	logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
 	logger.LogDebug(fmt.Sprintf("HTTP completed: %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 }
 

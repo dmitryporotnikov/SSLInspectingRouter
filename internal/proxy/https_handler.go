@@ -63,14 +63,14 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	if h.blockList != nil && h.blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
-		logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
-		logger.LogHTTPSResponse(sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
+		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+		logger.LogHTTPSResponse(reqID, sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
 		return
 	}
 
 	if h.bypassList != nil && h.bypassList.Matches(hostname) {
-		logger.LogBypassedRequest(sourceIP, hostname)
-		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes)
+		reqID := logger.LogBypassedRequest(sourceIP, hostname)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID)
 		return
 	}
 
@@ -105,18 +105,18 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	h.handleHTTPSRequest(tlsConn, hostname, sourceIP)
 }
 
-func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte) {
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64) {
 	upstreamConn, err := net.DialTimeout("tcp", net.JoinHostPort(hostname, "443"), 10*time.Second)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s: %v", hostname, err))
-		logger.LogBypassedResponse(sourceIP, hostname)
+		logger.LogBypassedResponse(reqID, sourceIP, hostname)
 		return
 	}
 	defer upstreamConn.Close()
 
 	if _, err := io.Copy(upstreamConn, bytes.NewReader(peekedBytes)); err != nil {
 		logger.LogError(fmt.Sprintf("Bypass upstream write failed for %s: %v", hostname, err))
-		logger.LogBypassedResponse(sourceIP, hostname)
+		logger.LogBypassedResponse(reqID, sourceIP, hostname)
 		return
 	}
 
@@ -144,7 +144,7 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 		}
 	}
 
-	logger.LogBypassedResponse(sourceIP, hostname)
+	logger.LogBypassedResponse(reqID, sourceIP, hostname)
 	logger.LogDebug(fmt.Sprintf("HTTPS bypassed: %s", hostname))
 }
 
@@ -164,7 +164,7 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 
 	fullURL := fmt.Sprintf("https://%s%s", hostname, req.URL.RequestURI())
 
-	logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
+	reqID := logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
 
 	proxyReq, err := http.NewRequest(req.Method, fullURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
@@ -180,7 +180,7 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
-		logger.LogHTTPSResponse(sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+		logger.LogHTTPSResponse(reqID, sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
 		return
 	}
 	defer resp.Body.Close()
@@ -193,7 +193,7 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
 		return
 	}
-	logger.LogHTTPSResponse(sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+	logger.LogHTTPSResponse(reqID, sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
 
 	logger.LogDebug(fmt.Sprintf("HTTPS completed: %s %s -> %d", req.Method, fullURL, resp.StatusCode))
 }

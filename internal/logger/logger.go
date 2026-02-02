@@ -144,75 +144,84 @@ func LogConsoleRequest(sourceIP, fqdn string) {
 }
 
 // LogHTTPRequest writes HTTP request details to SQLite.
-func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) {
+func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) int64 {
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
-	insertRequest(sourceIP, fqdn, requestLine, content)
+	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
+	return id
 }
 
 // LogHTTPSRequest writes HTTPS request details to SQLite.
-func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) {
+func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) int64 {
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
-	insertRequest(sourceIP, fqdn, requestLine, content)
+	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
+	return id
 }
 
 // LogHTTPResponse writes HTTP response details to SQLite.
-func LogHTTPResponse(sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
 	content := formatContentWithLimit(headers, bodyPreview, truncated)
-	insertResponse(sourceIP, fqdn, status, content)
+	insertResponse(reqID, sourceIP, fqdn, status, content)
 }
 
 // LogHTTPSResponse writes HTTPS response details to SQLite.
-func LogHTTPSResponse(sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
 	content := formatContentWithLimit(headers, bodyPreview, truncated)
-	insertResponse(sourceIP, fqdn, status, content)
+	insertResponse(reqID, sourceIP, fqdn, status, content)
 }
 
 // LogDNSRequest writes DNS request details to SQLite.
-func LogDNSRequest(sourceIP, fqdn, queryType string) {
+func LogDNSRequest(sourceIP, fqdn, queryType string) int64 {
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("DNS QUERY %s", queryType)
-	insertRequest(sourceIP, fqdn, requestLine, "")
+	id, _ := insertRequest(sourceIP, fqdn, requestLine, "")
+	return id
 }
 
 // LogDNSResponse writes DNS response details to SQLite.
-func LogDNSResponse(sourceIP, fqdn, summary, content string) {
-	insertResponse(sourceIP, fqdn, summary, content)
+func LogDNSResponse(reqID int64, sourceIP, fqdn, summary, content string) {
+	insertResponse(reqID, sourceIP, fqdn, summary, content)
 }
 
 // LogTLSRequest logs a non-HTTP TLS request (e.g. blocked by SNI) to SQLite.
-func LogTLSRequest(sourceIP, fqdn, note string) {
+func LogTLSRequest(sourceIP, fqdn, note string) int64 {
 	LogConsoleRequest(sourceIP, fqdn)
-	insertRequest(sourceIP, fqdn, note, "")
+	id, _ := insertRequest(sourceIP, fqdn, note, "")
+	return id
 }
 
 // LogBypassedRequest records a bypassed request without storing payload details.
-func LogBypassedRequest(sourceIP, fqdn string) {
+func LogBypassedRequest(sourceIP, fqdn string) int64 {
 	LogConsoleRequest(sourceIP, fqdn)
-	insertRequest(sourceIP, fqdn, "BYPASSED", "")
+	id, _ := insertRequest(sourceIP, fqdn, "BYPASSED", "")
+	return id
 }
 
 // LogBypassedResponse records a bypassed response without storing payload details.
-func LogBypassedResponse(sourceIP, fqdn string) {
-	insertResponse(sourceIP, fqdn, "BYPASSED", "")
+func LogBypassedResponse(reqID int64, sourceIP, fqdn string) {
+	insertResponse(reqID, sourceIP, fqdn, "BYPASSED", "")
 }
 
-func insertRequest(sourceIP, fqdn, requestLine, content string) {
+func insertRequest(sourceIP, fqdn, requestLine, content string) (int64, error) {
 	if DB == nil {
-		return
+		return 0, nil
 	}
 	logMutex.Lock()
 	defer logMutex.Unlock()
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	_, _ = DB.Exec(`INSERT INTO Requests (timestamp, source_ip, fqdn, request, content) VALUES (?, ?, ?, ?, ?)`,
+	res, err := DB.Exec(`INSERT INTO Requests (timestamp, source_ip, fqdn, request, content) VALUES (?, ?, ?, ?, ?)`,
 		timestamp, sourceIP, fqdn, requestLine, content)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
 }
 
-func insertResponse(sourceIP, fqdn, responseLine, content string) {
+func insertResponse(id int64, sourceIP, fqdn, responseLine, content string) {
 	if DB == nil {
 		return
 	}
@@ -220,8 +229,9 @@ func insertResponse(sourceIP, fqdn, responseLine, content string) {
 	defer logMutex.Unlock()
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	_, _ = DB.Exec(`INSERT INTO Responses (timestamp, source_ip, fqdn, response, content) VALUES (?, ?, ?, ?, ?)`,
-		timestamp, sourceIP, fqdn, responseLine, content)
+	// Force ID to match the request ID
+	_, _ = DB.Exec(`INSERT INTO Responses (id, timestamp, source_ip, fqdn, response, content) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, timestamp, sourceIP, fqdn, responseLine, content)
 }
 
 func formatContent(headers http.Header, body []byte) string {
