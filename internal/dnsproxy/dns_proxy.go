@@ -1,4 +1,4 @@
-package main
+package dnsproxy
 
 import (
 	"bufio"
@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
 
 const (
@@ -21,10 +24,10 @@ const (
 type DNSProxy struct {
 	listenAddr string
 	upstreams  []string
-	blockList  *BlockList
+	blockList  *blocklist.BlockList
 }
 
-func NewDNSProxy(listenPort int, blockList *BlockList) (*DNSProxy, error) {
+func NewDNSProxy(listenPort int, blockList *blocklist.BlockList) (*DNSProxy, error) {
 	if blockList == nil || blockList.Count() == 0 {
 		return nil, errors.New("drop list is empty")
 	}
@@ -73,7 +76,7 @@ func (p *DNSProxy) serveUDP(conn net.PacketConn) {
 	for {
 		n, addr, err := conn.ReadFrom(buf)
 		if err != nil {
-			LogError(fmt.Sprintf("DNS UDP read error: %v", err))
+			logger.LogError(fmt.Sprintf("DNS UDP read error: %v", err))
 			continue
 		}
 
@@ -83,27 +86,27 @@ func (p *DNSProxy) serveUDP(conn net.PacketConn) {
 		blocked, qname, qtype := p.analyzeQuery(payload)
 		sourceIP, _, _ := net.SplitHostPort(addr.String())
 		if qname != "" {
-			LogDNSRequest(sourceIP, qname, qtype)
+			logger.LogDNSRequest(sourceIP, qname, qtype)
 		}
 		if blocked {
-			LogInfo(fmt.Sprintf("Dropped DNS UDP query for %s from %s", qname, addr.String()))
+			logger.LogInfo(fmt.Sprintf("Dropped DNS UDP query for %s from %s", qname, addr.String()))
 			if qname != "" {
-				LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
+				logger.LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
 			}
 			continue
 		}
 
 		resp, err := p.forwardUDP(payload)
 		if err != nil {
-			LogError(fmt.Sprintf("DNS UDP forward error: %v", err))
+			logger.LogError(fmt.Sprintf("DNS UDP forward error: %v", err))
 			continue
 		}
 		if qname != "" {
-			LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
+			logger.LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
 		}
 
 		if _, err := conn.WriteTo(resp, addr); err != nil {
-			LogError(fmt.Sprintf("DNS UDP write error: %v", err))
+			logger.LogError(fmt.Sprintf("DNS UDP write error: %v", err))
 		}
 	}
 }
@@ -113,7 +116,7 @@ func (p *DNSProxy) serveTCP(ln net.Listener) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			LogError(fmt.Sprintf("DNS TCP accept error: %v", err))
+			logger.LogError(fmt.Sprintf("DNS TCP accept error: %v", err))
 			continue
 		}
 		go p.handleTCP(conn)
@@ -141,23 +144,23 @@ func (p *DNSProxy) handleTCP(conn net.Conn) {
 	blocked, qname, qtype := p.analyzeQuery(msg)
 	sourceIP, _, _ := net.SplitHostPort(conn.RemoteAddr().String())
 	if qname != "" {
-		LogDNSRequest(sourceIP, qname, qtype)
+		logger.LogDNSRequest(sourceIP, qname, qtype)
 	}
 	if blocked {
-		LogInfo(fmt.Sprintf("Dropped DNS TCP query for %s from %s", qname, conn.RemoteAddr().String()))
+		logger.LogInfo(fmt.Sprintf("Dropped DNS TCP query for %s from %s", qname, conn.RemoteAddr().String()))
 		if qname != "" {
-			LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
+			logger.LogDNSResponse(sourceIP, qname, "DNS DROPPED", "Blocked by policy")
 		}
 		return
 	}
 
 	resp, err := p.forwardTCP(msg)
 	if err != nil {
-		LogError(fmt.Sprintf("DNS TCP forward error: %v", err))
+		logger.LogError(fmt.Sprintf("DNS TCP forward error: %v", err))
 		return
 	}
 	if qname != "" {
-		LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
+		logger.LogDNSResponse(sourceIP, qname, "DNS RESPONSE", fmt.Sprintf("Bytes: %d", len(resp)))
 	}
 
 	respLen := len(resp)

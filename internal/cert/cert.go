@@ -1,4 +1,4 @@
-package main
+package cert
 
 import (
 	"crypto/rand"
@@ -12,6 +12,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
 
 // CertManager handles the creation and storage of the Root CA and dynamic host certificates.
@@ -37,8 +39,8 @@ func NewCertManager(forceNew bool) (*CertManager, error) {
 
 	if !forceNew {
 		if err := cm.loadCA("ca-cert.pem", "ca-key.pem"); err == nil {
-			LogInfo("Loaded existing CA certificate and key.")
-			LogInfo("Install ca-cert.pem to your system trust store to prevent browser warnings.")
+			logger.LogInfo("Loaded existing CA certificate and key.")
+			logger.LogInfo("Install ca-cert.pem to your system trust store to prevent browser warnings.")
 			return cm, nil
 		}
 	}
@@ -88,9 +90,9 @@ func NewCertManager(forceNew bool) (*CertManager, error) {
 		return nil, fmt.Errorf("failed to save CA key: %v", err)
 	}
 
-	LogInfo("CA certificate generated: ca-cert.pem")
-	LogInfo("CA private key stored: ca-key.pem")
-	LogInfo("Install this to your system trust store to prevent browser warnings.")
+	logger.LogInfo("CA certificate generated: ca-cert.pem")
+	logger.LogInfo("CA private key stored: ca-key.pem")
+	logger.LogInfo("Install this to your system trust store to prevent browser warnings.")
 
 	return cm, nil
 }
@@ -211,7 +213,7 @@ func (cm *CertManager) GetCertificateForHost(hostname string) (*CertPair, error)
 	}
 
 	cm.certCache[hostname] = certPair
-	LogDebug(fmt.Sprintf("Certificate generated for: %s", hostname))
+	logger.LogDebug(fmt.Sprintf("Certificate generated for: %s", hostname))
 
 	return certPair, nil
 }

@@ -32,11 +32,16 @@ fi
 
 echo "Building router..."
 
+# Navigate to project root (parent of scripts directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
 if [ -f "go.mod" ]; then
-    go build -o sslinspectingrouter
+    go build -o sslinspectingrouter ./cmd/router
     echo "Build success: ./sslinspectingrouter"
 else
-    echo "WARNING: go.mod not found, skipping build."
+    echo "WARNING: go.mod not found in $PROJECT_ROOT, skipping build."
 fi
 
 echo "Setup complete."

@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"crypto/tls"
@@ -7,19 +7,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 )
 
 // TestTLSHandshakeFix verifies that the server can complete a TLS handshake
 // even after extractSNI has consumed the ClientHello.
 func TestTLSHandshakeFix(t *testing.T) {
 	// 1. Setup CertManager
-	cm, err := NewCertManager(true)
+	cm, err := cert.NewCertManager(true)
 	if err != nil {
 		t.Fatalf("Failed to create CertManager: %v", err)
 	}
 
 	// 2. Setup HTTPSHandler
-	handler := NewHTTPSHandler(cm, nil, nil)
+	handler := proxy.NewHTTPSHandler(cm, nil, nil)
 
 	// 3. Start a listener to simulate the transparent proxy intercept
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

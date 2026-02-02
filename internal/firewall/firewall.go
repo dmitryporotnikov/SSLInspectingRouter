@@ -1,31 +1,40 @@
-package main
+package firewall
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
 
 // FirewallManager handles the configuration of iptables rules to transparently intercept traffic.
 type FirewallManager struct {
-	httpPort  int
-	httpsPort int
-	dnsPort   int
-	enableDNS bool
-	blockQuic bool
-	rules     []string
+	httpPort   int
+	httpsPort  int
+	dnsPort    int
+	enableDNS  bool
+	blockQuic  bool
+	blockedIPs []string
+	rules      []string
 }
 
 func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
 	return &FirewallManager{
-		httpPort:  httpPort,
-		httpsPort: httpsPort,
-		dnsPort:   0,
-		enableDNS: false,
-		blockQuic: false,
-		rules:     make([]string, 0),
+		httpPort:   httpPort,
+		httpsPort:  httpsPort,
+		dnsPort:    0,
+		enableDNS:  false,
+		blockQuic:  false,
+		blockedIPs: make([]string, 0),
+		rules:      make([]string, 0),
 	}
+}
+
+// EnableIPBlocking configures the firewall to drop traffic to specific IPs/CIDRs.
+func (fm *FirewallManager) EnableIPBlocking(ips []string) {
+	fm.blockedIPs = append(fm.blockedIPs, ips...)
 }
 
 // EnableDNSRedirect toggles DNS interception for a local DNS proxy port.
@@ -42,7 +51,7 @@ func (fm *FirewallManager) EnableQUICBlock() {
 // Setup applies the necessary iptables rules to redirect traffic to the proxy ports.
 // It requires root privileges.
 func (fm *FirewallManager) Setup() error {
-	LogInfo("Configuring iptables for transparent proxying...")
+	logger.LogInfo("Configuring iptables for transparent proxying...")
 
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("root privileges required for iptables configuration")
@@ -128,6 +137,31 @@ func (fm *FirewallManager) Setup() error {
 		fm.rules = append(fm.rules, strings.Join(rule, " "))
 	}
 
+	// Apply IP blocking rules (DROP)
+	for _, ip := range fm.blockedIPs {
+		// Rule: Drop in FORWARD (for traffic passing through the router)
+		rule = []string{
+			"-t", "filter", "-I", "FORWARD",
+			"-d", ip, "-j", "DROP",
+		}
+		if err := fm.runIPTables(rule...); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to add BLOCK rule for %s (FORWARD): %v", ip, err))
+		} else {
+			fm.rules = append(fm.rules, strings.Join(rule, " "))
+		}
+
+		// Rule: Drop in OUTPUT (for traffic originating from the router itself)
+		rule = []string{
+			"-t", "filter", "-I", "OUTPUT",
+			"-d", ip, "-j", "DROP",
+		}
+		if err := fm.runIPTables(rule...); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to add BLOCK rule for %s (OUTPUT): %v", ip, err))
+		} else {
+			fm.rules = append(fm.rules, strings.Join(rule, " "))
+		}
+	}
+
 	// Apply SSLPROXY chain to PREROUTING (for incoming traffic from other devices)
 	rule = []string{
 		"-t", "nat", "-A", "PREROUTING",
@@ -145,19 +179,22 @@ func (fm *FirewallManager) Setup() error {
 		"-j", "SSLPROXY",
 	}
 	if err := fm.runIPTables(rule...); err != nil {
-		LogError(fmt.Sprintf("Failed to apply OUTPUT chain rule (non-critical): %v", err))
+		logger.LogError(fmt.Sprintf("Failed to apply OUTPUT chain rule (non-critical): %v", err))
 	} else {
 		fm.rules = append(fm.rules, strings.Join(rule, " "))
 	}
 
-	LogInfo("iptables configured.")
-	LogInfo(fmt.Sprintf("Redirecting port 80  -> :%d", fm.httpPort))
-	LogInfo(fmt.Sprintf("Redirecting port 443 -> :%d", fm.httpsPort))
+	logger.LogInfo("iptables configured.")
+	logger.LogInfo(fmt.Sprintf("Redirecting port 80  -> :%d", fm.httpPort))
+	logger.LogInfo(fmt.Sprintf("Redirecting port 443 -> :%d", fm.httpsPort))
 	if fm.enableDNS {
-		LogInfo(fmt.Sprintf("Redirecting DNS (53/udp,tcp) -> :%d", fm.dnsPort))
+		logger.LogInfo(fmt.Sprintf("Redirecting DNS (53/udp,tcp) -> :%d", fm.dnsPort))
 	}
 	if fm.blockQuic {
-		LogInfo("Blocking QUIC (UDP/443)")
+		logger.LogInfo("Blocking QUIC (UDP/443)")
+	}
+	if len(fm.blockedIPs) > 0 {
+		logger.LogInfo(fmt.Sprintf("Blocking %d IPs/CIDRs at network layer", len(fm.blockedIPs)))
 	}
 
 	return nil
@@ -165,7 +202,7 @@ func (fm *FirewallManager) Setup() error {
 
 // Cleanup flushes and removes the custom iptables chain.
 func (fm *FirewallManager) Cleanup() error {
-	LogInfo("Reverting iptables rules...")
+	logger.LogInfo("Reverting iptables rules...")
 
 	fm.runIPTables("-t", "nat", "-F", "SSLPROXY")
 	fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSLPROXY")
@@ -176,7 +213,19 @@ func (fm *FirewallManager) Cleanup() error {
 		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-p", "udp", "--dport", "443", "-j", "DROP")
 	}
 
-	LogInfo("iptables rules cleaned up.")
+	// Cleanup blocking rules is handled by iterating stored rules in reverse order?
+	// Currently fm.rules stores the command args.
+	// To strictly clean up what we added:
+	// Reverse iterate fm.rules and delete?
+	// The current Cleanup implementation seems to hardcode deletions.
+	// We should probably iterate fm.rules and flip -A/-I to -D.
+	// However, simple approach for now:
+	for _, ip := range fm.blockedIPs {
+		fm.runIPTables("-t", "filter", "-D", "FORWARD", "-d", ip, "-j", "DROP")
+		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-d", ip, "-j", "DROP")
+	}
+
+	logger.LogInfo("iptables rules cleaned up.")
 	return nil
 }
 

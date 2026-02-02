@@ -1,4 +1,4 @@
-package main
+package logger
 
 import (
 	"database/sql"
@@ -18,12 +18,12 @@ import (
 var (
 	logMutex     sync.Mutex
 	consoleMutex sync.Mutex
-	db           *sql.DB
+	DB           *sql.DB
 )
 
 const (
-	logDBFile       = "traffic.db"
-	maxContentBytes = 4096
+	logDBFile           = "traffic.db"
+	MaxContentBytes     = 4096
 	consoleRequestsOnly = true
 )
 
@@ -33,9 +33,9 @@ func SetLogTruncation(enabled bool) {
 	truncateLogs = enabled
 }
 
-func logBodyLimit() int {
+func LogBodyLimit() int {
 	if truncateLogs {
-		return maxContentBytes
+		return MaxContentBytes
 	}
 	return -1
 }
@@ -53,15 +53,16 @@ func InitLogger() error {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return fmt.Errorf("failed to create logs directory: %v", err)
 	}
-	db, err = sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", dbPath))
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", dbPath))
 	if err != nil {
 		return fmt.Errorf("failed to open sqlite db: %v", err)
 	}
 	if err := db.Ping(); err != nil {
 		return fmt.Errorf("failed to ping sqlite db: %v", err)
 	}
+	DB = db
 
-	if _, err := db.Exec(`
+	if _, err := DB.Exec(`
 		CREATE TABLE IF NOT EXISTS Requests (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp TEXT NOT NULL,
@@ -74,7 +75,7 @@ func InitLogger() error {
 		return fmt.Errorf("failed to create Requests table: %v", err)
 	}
 
-	if _, err := db.Exec(`
+	if _, err := DB.Exec(`
 		CREATE TABLE IF NOT EXISTS Responses (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp TEXT NOT NULL,
@@ -115,8 +116,8 @@ func WipeLogDB() error {
 }
 
 func CloseLogger() {
-	if db != nil {
-		db.Close()
+	if DB != nil {
+		DB.Close()
 	}
 }
 
@@ -200,31 +201,31 @@ func LogBypassedResponse(sourceIP, fqdn string) {
 }
 
 func insertRequest(sourceIP, fqdn, requestLine, content string) {
-	if db == nil {
+	if DB == nil {
 		return
 	}
 	logMutex.Lock()
 	defer logMutex.Unlock()
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	_, _ = db.Exec(`INSERT INTO Requests (timestamp, source_ip, fqdn, request, content) VALUES (?, ?, ?, ?, ?)`,
+	_, _ = DB.Exec(`INSERT INTO Requests (timestamp, source_ip, fqdn, request, content) VALUES (?, ?, ?, ?, ?)`,
 		timestamp, sourceIP, fqdn, requestLine, content)
 }
 
 func insertResponse(sourceIP, fqdn, responseLine, content string) {
-	if db == nil {
+	if DB == nil {
 		return
 	}
 	logMutex.Lock()
 	defer logMutex.Unlock()
 
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
-	_, _ = db.Exec(`INSERT INTO Responses (timestamp, source_ip, fqdn, response, content) VALUES (?, ?, ?, ?, ?)`,
+	_, _ = DB.Exec(`INSERT INTO Responses (timestamp, source_ip, fqdn, response, content) VALUES (?, ?, ?, ?, ?)`,
 		timestamp, sourceIP, fqdn, responseLine, content)
 }
 
 func formatContent(headers http.Header, body []byte) string {
-	preview, truncated := truncateBytes(body, maxContentBytes)
+	preview, truncated := truncateBytes(body, MaxContentBytes)
 	return formatContentWithLimit(headers, preview, truncated)
 }
 
@@ -259,41 +260,41 @@ func truncateBytes(body []byte, max int) ([]byte, bool) {
 	return body[:max], true
 }
 
-type limitedBuffer struct {
-	buf       []byte
-	max       int
-	truncated bool
+type LimitedBuffer struct {
+	Buf         []byte
+	Max         int
+	IsTruncated bool
 }
 
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.max < 0 {
-		b.buf = append(b.buf, p...)
+func (b *LimitedBuffer) Write(p []byte) (int, error) {
+	if b.Max < 0 {
+		b.Buf = append(b.Buf, p...)
 		return len(p), nil
 	}
-	if b.max == 0 {
-		b.truncated = b.truncated || len(p) > 0
+	if b.Max == 0 {
+		b.IsTruncated = b.IsTruncated || len(p) > 0
 		return len(p), nil
 	}
-	remaining := b.max - len(b.buf)
+	remaining := b.Max - len(b.Buf)
 	if remaining > 0 {
 		if len(p) <= remaining {
-			b.buf = append(b.buf, p...)
+			b.Buf = append(b.Buf, p...)
 		} else {
-			b.buf = append(b.buf, p[:remaining]...)
-			b.truncated = true
+			b.Buf = append(b.Buf, p[:remaining]...)
+			b.IsTruncated = true
 		}
 	} else {
-		b.truncated = true
+		b.IsTruncated = true
 	}
 	return len(p), nil
 }
 
-func (b *limitedBuffer) Bytes() []byte {
-	return b.buf
+func (b *LimitedBuffer) Bytes() []byte {
+	return b.Buf
 }
 
-func (b *limitedBuffer) Truncated() bool {
-	return b.truncated
+func (b *LimitedBuffer) Truncated() bool {
+	return b.IsTruncated
 }
 
 // ReadBody safely reads the request body without closing it, returning the bytes.
