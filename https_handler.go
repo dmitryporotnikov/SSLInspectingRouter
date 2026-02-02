@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,10 +18,11 @@ type HTTPSHandler struct {
 	certManager *CertManager
 	client      *http.Client
 	blockList   *BlockList
+	bypassList  *BlockList
 }
 
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
-func NewHTTPSHandler(certManager *CertManager, blockList *BlockList) *HTTPSHandler {
+func NewHTTPSHandler(certManager *CertManager, blockList *BlockList, bypassList *BlockList) *HTTPSHandler {
 	return &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
@@ -34,7 +36,8 @@ func NewHTTPSHandler(certManager *CertManager, blockList *BlockList) *HTTPSHandl
 				},
 			},
 		},
-		blockList: blockList,
+		blockList:  blockList,
+		bypassList: bypassList,
 	}
 }
 
@@ -43,7 +46,7 @@ func NewHTTPSHandler(certManager *CertManager, blockList *BlockList) *HTTPSHandl
 func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	sourceIP := conn.RemoteAddr().String()
+	sourceIP := sourceIPFromAddr(conn.RemoteAddr())
 	LogDebug(fmt.Sprintf("HTTPS connection from %s", sourceIP))
 
 	hostname, peekedBytes, err := h.extractSNI(conn)
@@ -58,6 +61,12 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 		LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
 		LogTLSRequest(sourceIP, hostname, "TLS SNI")
 		LogHTTPSResponse(sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
+		return
+	}
+
+	if h.bypassList != nil && h.bypassList.Matches(hostname) {
+		LogBypassedRequest(sourceIP, hostname)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes)
 		return
 	}
 
@@ -90,6 +99,49 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	defer tlsConn.Close()
 
 	h.handleHTTPSRequest(tlsConn, hostname, sourceIP)
+}
+
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte) {
+	upstreamConn, err := net.DialTimeout("tcp", net.JoinHostPort(hostname, "443"), 10*time.Second)
+	if err != nil {
+		LogError(fmt.Sprintf("Bypass upstream dial failed for %s: %v", hostname, err))
+		LogBypassedResponse(sourceIP, hostname)
+		return
+	}
+	defer upstreamConn.Close()
+
+	if _, err := io.Copy(upstreamConn, bytes.NewReader(peekedBytes)); err != nil {
+		LogError(fmt.Sprintf("Bypass upstream write failed for %s: %v", hostname, err))
+		LogBypassedResponse(sourceIP, hostname)
+		return
+	}
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		_, err := io.Copy(upstreamConn, clientConn)
+		if tcpConn, ok := upstreamConn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+		errCh <- err
+	}()
+
+	go func() {
+		_, err := io.Copy(clientConn, upstreamConn)
+		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+		errCh <- err
+	}()
+
+	for i := 0; i < 2; i++ {
+		if copyErr := <-errCh; copyErr != nil && !isTunnelCompletion(copyErr) {
+			LogDebug(fmt.Sprintf("HTTPS bypass stream closed for %s: %v", hostname, copyErr))
+		}
+	}
+
+	LogBypassedResponse(sourceIP, hostname)
+	LogDebug(fmt.Sprintf("HTTPS bypassed: %s", hostname))
 }
 
 // handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.
@@ -281,4 +333,19 @@ func sendHTTPError(conn net.Conn, statusCode int, message string) {
 	response := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n%s",
 		statusCode, http.StatusText(statusCode), len(message), message)
 	conn.Write([]byte(response))
+}
+
+func sourceIPFromAddr(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+	return host
+}
+
+func isTunnelCompletion(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrClosedPipe)
 }

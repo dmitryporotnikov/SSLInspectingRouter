@@ -188,6 +188,17 @@ func LogTLSRequest(sourceIP, fqdn, note string) {
 	insertRequest(sourceIP, fqdn, note, "")
 }
 
+// LogBypassedRequest records a bypassed request without storing payload details.
+func LogBypassedRequest(sourceIP, fqdn string) {
+	LogConsoleRequest(sourceIP, fqdn)
+	insertRequest(sourceIP, fqdn, "BYPASSED", "")
+}
+
+// LogBypassedResponse records a bypassed response without storing payload details.
+func LogBypassedResponse(sourceIP, fqdn string) {
+	insertResponse(sourceIP, fqdn, "BYPASSED", "")
+}
+
 func insertRequest(sourceIP, fqdn, requestLine, content string) {
 	if db == nil {
 		return

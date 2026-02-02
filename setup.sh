@@ -33,8 +33,8 @@ fi
 echo "Building router..."
 
 if [ -f "go.mod" ]; then
-    go build -o sslrouter
-    echo "Build success: ./sslrouter"
+    go build -o sslinspectingrouter
+    echo "Build success: ./sslinspectingrouter"
 else
     echo "WARNING: go.mod not found, skipping build."
 fi

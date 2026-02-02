@@ -27,7 +27,7 @@ To build the project:
 sudo ./setup.sh
 ```
 
-If the build is successful, a binary named `sslrouter` will be created in the project root.
+If the build is successful, a binary named `sslinspectingrouter` will be created in the project root.
 
 ## Execution
 
@@ -38,7 +38,7 @@ If the build is successful, a binary named `sslrouter` will be created in the pr
 Run the binary as the root user:
 
 ```bash
-sudo ./sslrouter
+sudo ./sslinspectingrouter
 ```
 
 On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are reused on subsequent runs.
@@ -47,16 +47,17 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are
 
 | Command | Description |
 | --- | --- |
-| `sudo ./sslrouter -newcacert` | Force regeneration of the CA certificate and key. |
-| `sudo ./sslrouter -allowquic` | Allow QUIC (UDP/443) traffic. By default, QUIC is blocked to enforce HTTPS over TCP. |
-| `sudo ./sslrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
-| `sudo ./sslrouter -wipedb` | Clear the traffic database before startup. |
-| `sudo ./sslrouter -drop <list>` | Drop requests for specific FQDNs (comma-separated). Subdomains are also blocked. |
+| `sudo ./sslinspectingrouter -newcacert` | Force regeneration of the CA certificate and key. |
+| `sudo ./sslinspectingrouter -allowquic` | Allow QUIC (UDP/443) traffic. By default, QUIC is blocked to enforce HTTPS over TCP. |
+| `sudo ./sslinspectingrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
+| `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database before startup. |
+| `sudo ./sslinspectingrouter -drop <list>` | Drop requests for specific FQDNs (comma-separated). Subdomains are also blocked. |
+| `sudo ./sslinspectingrouter -bypass <list>` | Bypass inspection for specific FQDNs (HTTP Host + HTTPS SNI). Subdomains are also bypassed. Bypassed entries are still logged, but `request` / `response` in SQLite are stored as `BYPASSED`: |
 
 **Example: Blocking specific domains**
 
 ```bash
-sudo ./sslrouter -drop test.com,test2.com
+sudo ./sslinspectingrouter -drop test.com,test2.com
 
 ```
 

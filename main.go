@@ -17,6 +17,7 @@ const (
 
 func main() {
 	dropFlag := flag.String("drop", "", "comma-separated FQDNs to drop (DNS/HTTP/HTTPS)")
+	bypassFlag := flag.String("bypass", "", "comma-separated FQDNs to bypass inspection (HTTP/HTTPS)")
 	newCACert := flag.Bool("newcacert", false, "generate a new CA certificate and key")
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
@@ -32,6 +33,7 @@ func main() {
 	}
 	dropList := parseDropList(*dropFlag)
 	blockList := NewBlockList(dropList)
+	bypassList := NewBlockList(parseDropList(*bypassFlag))
 
 	PrintBanner()
 
@@ -85,14 +87,17 @@ func main() {
 	// Ensure cleaner shutdown of firewall rules on interrupt
 	setupCleanupHandler(firewallManager)
 
-	httpHandler := NewHTTPHandler(blockList)
-	httpsHandler := NewHTTPSHandler(certManager, blockList)
+	httpHandler := NewHTTPHandler(blockList, bypassList)
+	httpsHandler := NewHTTPSHandler(certManager, blockList, bypassList)
 
 	LogInfo("Router is active.")
 	LogInfo(fmt.Sprintf("HTTP  -> :%d", HTTP_PROXY_PORT))
 	LogInfo(fmt.Sprintf("HTTPS -> :%d", HTTPS_PROXY_PORT))
 	if dnsProxy != nil {
 		LogInfo(fmt.Sprintf("DNS   -> :%d (drop enabled)", DNS_PROXY_PORT))
+	}
+	if bypassList != nil {
+		LogInfo(fmt.Sprintf("Bypass list enabled (%d entries)", bypassList.Count()))
 	}
 	LogInfo("CA Path: ca-cert.pem")
 	LogInfo("Logs: logs/http.log, logs/https.log")
