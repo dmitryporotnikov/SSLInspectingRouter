@@ -50,6 +50,7 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are
 | `sudo ./sslinspectingrouter -newcacert` | Force regeneration of the CA certificate and key. |
 | `sudo ./sslinspectingrouter -allowquic` | Allow QUIC (UDP/443) traffic. By default, QUIC is blocked to enforce HTTPS over TCP. |
 | `sudo ./sslinspectingrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
+| `sudo ./sslinspectingrouter -web <addr>` | Start the Web Dashboard on the specified address (e.g., `:3000`). |
 | `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database before startup. |
 | `sudo ./sslinspectingrouter -drop <list>` | Drop requests for specific FQDNs, IPs, CIDR (comma-separated). Subdomains are also blocked. |
 | `sudo ./sslinspectingrouter -bypass <list>` | Bypass inspection for specific FQDNs (HTTP Host + HTTPS SNI), IPs or CIDRs. Subdomains are also bypassed. Bypassed entries are still logged, but `request` / `response` in SQLite are stored as `BYPASSED`: |

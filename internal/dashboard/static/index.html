@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSL Inspector Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="top-bar">
+            <div class="header-left">
+                <div class="logo">🔒 SSL Inspecting Router</div>
+                <div class="status-pill">
+                    <div id="status-led" class="led"></div>
+                    <span id="status-text">Live</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="content">
+            <div class="traffic-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Method</th>
+                            <th>Host</th>
+                            <th>Path</th>
+                            <th>Client</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traffic-body">
+                        <!-- Rows injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </main>
+
+        <!-- Detail Modal -->
+        <div id="modal-overlay" class="modal-overlay hidden">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Traffic Details</h2>
+                    <button id="modal-close" class="close-btn">&times;</button>
+                </div>
+                <div class="modal-body" id="modal-content">
+                    <!-- Content injected by JS -->
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+
+</html>

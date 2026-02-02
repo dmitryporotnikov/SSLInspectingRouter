@@ -12,6 +12,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/banner"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/dashboard"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/dnsproxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
@@ -31,6 +32,7 @@ func main() {
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
 	wipeDB := flag.Bool("wipedb", false, "delete the traffic database before startup")
+	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
 	flag.Parse()
 
 	logger.SetLogTruncation(*truncateLog)
@@ -59,6 +61,14 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.CloseLogger()
+
+	if *webFlag != "" {
+		go func() {
+			if err := dashboard.Start(logger.DB, *webFlag); err != nil {
+				logger.LogError(fmt.Sprintf("Dashboard server failed: %v", err))
+			}
+		}()
+	}
 
 	logger.LogInfo("Initializing services...")
 
