@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	_ "modernc.org/sqlite"
 )
 
@@ -149,6 +150,19 @@ func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, bod
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
 	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
+
+	if pcap.GlobalManager != nil {
+		reqDump := fmt.Sprintf("%s %s HTTP/1.1\r\nHost: %s\r\n", method, url, fqdn)
+		for k, v := range headers {
+			for _, val := range v {
+				reqDump += fmt.Sprintf("%s: %s\r\n", k, val)
+			}
+		}
+		reqDump += "\r\n"
+		fullReq := append([]byte(reqDump), body...)
+		pcap.GlobalManager.WriteRequest(id, sourceIP, fqdn, fullReq)
+	}
+
 	return id
 }
 
@@ -158,6 +172,19 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
 	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
+
+	if pcap.GlobalManager != nil {
+		reqDump := fmt.Sprintf("%s %s HTTP/1.1\r\nHost: %s\r\n", method, url, fqdn)
+		for k, v := range headers {
+			for _, val := range v {
+				reqDump += fmt.Sprintf("%s: %s\r\n", k, val)
+			}
+		}
+		reqDump += "\r\n"
+		fullReq := append([]byte(reqDump), body...)
+		pcap.GlobalManager.WriteRequest(id, sourceIP, fqdn, fullReq)
+	}
+
 	return id
 }
 
@@ -165,12 +192,36 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
 	content := formatContentWithLimit(headers, bodyPreview, truncated)
 	insertResponse(reqID, sourceIP, fqdn, status, content)
+
+	if pcap.GlobalManager != nil {
+		resDump := fmt.Sprintf("HTTP/1.1 %s\r\n", status)
+		for k, v := range headers {
+			for _, val := range v {
+				resDump += fmt.Sprintf("%s: %s\r\n", k, val)
+			}
+		}
+		resDump += "\r\n"
+		fullRes := append([]byte(resDump), bodyPreview...)
+		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
+	}
 }
 
 // LogHTTPSResponse writes HTTPS response details to SQLite.
 func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
 	content := formatContentWithLimit(headers, bodyPreview, truncated)
 	insertResponse(reqID, sourceIP, fqdn, status, content)
+
+	if pcap.GlobalManager != nil {
+		resDump := fmt.Sprintf("HTTP/1.1 %s\r\n", status)
+		for k, v := range headers {
+			for _, val := range v {
+				resDump += fmt.Sprintf("%s: %s\r\n", k, val)
+			}
+		}
+		resDump += "\r\n"
+		fullRes := append([]byte(resDump), bodyPreview...)
+		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
+	}
 }
 
 // LogDNSRequest writes DNS request details to SQLite.

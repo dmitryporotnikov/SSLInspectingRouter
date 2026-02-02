@@ -16,6 +16,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/dnsproxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 )
 
@@ -33,6 +34,7 @@ func main() {
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
 	wipeDB := flag.Bool("wipedb", false, "delete the traffic database before startup")
 	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
+	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
 	flag.Parse()
 
 	logger.SetLogTruncation(*truncateLog)
@@ -61,6 +63,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.CloseLogger()
+
+	if *pcapFlag != "" {
+		if err := pcap.Init(*pcapFlag); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to initialize PCAP writer: %v", err))
+		} else {
+			logger.LogInfo(fmt.Sprintf("PCAP capture enabled: writing to %s", *pcapFlag))
+			defer pcap.Close()
+		}
+	}
 
 	if *webFlag != "" {
 		go func() {
