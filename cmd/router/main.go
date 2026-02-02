@@ -26,6 +26,7 @@ const (
 func main() {
 	dropFlag := flag.String("drop", "", "comma-separated FQDNs to drop (DNS/HTTP/HTTPS)")
 	bypassFlag := flag.String("bypass", "", "comma-separated FQDNs to bypass inspection (HTTP/HTTPS)")
+	inspectOnlyFlag := flag.String("inspectonly", "", "comma-separated IPs to inspect (if set, only these IPs are intercepted)")
 	newCACert := flag.Bool("newcacert", false, "generate a new CA certificate and key")
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
@@ -42,6 +43,7 @@ func main() {
 	dropList := blocklist.ParseDropList(*dropFlag)
 	blockList := blocklist.NewBlockList(dropList)
 	bypassList := blocklist.NewBlockList(blocklist.ParseDropList(*bypassFlag))
+	inspectOnlyList := blocklist.ParseDropList(*inspectOnlyFlag) // Reusing ParseDropList as it splits comma-separated strings
 
 	banner.PrintBanner()
 
@@ -70,6 +72,9 @@ func main() {
 	if !*allowQUIC {
 		firewallManager.EnableQUICBlock()
 		logger.LogInfo("QUIC blocking enabled.")
+	}
+	if len(inspectOnlyList) > 0 {
+		firewallManager.EnableInspectOnly(inspectOnlyList)
 	}
 
 	var dnsProxy *dnsproxy.DNSProxy

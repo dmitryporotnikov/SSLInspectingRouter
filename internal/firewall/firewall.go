@@ -11,25 +11,32 @@ import (
 
 // FirewallManager handles the configuration of iptables rules to transparently intercept traffic.
 type FirewallManager struct {
-	httpPort   int
-	httpsPort  int
-	dnsPort    int
-	enableDNS  bool
-	blockQuic  bool
-	blockedIPs []string
-	rules      []string
+	httpPort       int
+	httpsPort      int
+	dnsPort        int
+	enableDNS      bool
+	blockQuic      bool
+	blockedIPs     []string
+	inspectOnlyIPs []string
+	rules          []string
 }
 
 func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
 	return &FirewallManager{
-		httpPort:   httpPort,
-		httpsPort:  httpsPort,
-		dnsPort:    0,
-		enableDNS:  false,
-		blockQuic:  false,
-		blockedIPs: make([]string, 0),
-		rules:      make([]string, 0),
+		httpPort:       httpPort,
+		httpsPort:      httpsPort,
+		dnsPort:        0,
+		enableDNS:      false,
+		blockQuic:      false,
+		blockedIPs:     make([]string, 0),
+		inspectOnlyIPs: make([]string, 0),
+		rules:          make([]string, 0),
 	}
+}
+
+// EnableInspectOnly restricts interception to the specified source IPs.
+func (fm *FirewallManager) EnableInspectOnly(ips []string) {
+	fm.inspectOnlyIPs = append(fm.inspectOnlyIPs, ips...)
 }
 
 // EnableIPBlocking configures the firewall to drop traffic to specific IPs/CIDRs.
@@ -65,6 +72,15 @@ func (fm *FirewallManager) Setup() error {
 	if err := fm.runIPTables("-t", "nat", "-N", "SSLPROXY"); err != nil {
 		// If chain exists, flush it to start fresh
 		fm.runIPTables("-t", "nat", "-F", "SSLPROXY")
+	}
+
+	// Create custom chain SSL_DISPATCH to manage entry points
+	if err := fm.runIPTables("-t", "nat", "-N", "SSL_DISPATCH"); err != nil {
+		// If chain exists, flush it to start fresh
+		fm.runIPTables("-t", "nat", "-F", "SSL_DISPATCH")
+	} else {
+		// New chain created
+		fm.rules = append(fm.rules, "SSL_DISPATCH_CREATED") // Marker to remove chain on cleanup
 	}
 
 	// Rule: Redirect TCP/80 -> Local HTTP Proxy Port
@@ -162,13 +178,40 @@ func (fm *FirewallManager) Setup() error {
 		}
 	}
 
-	// Apply SSLPROXY chain to PREROUTING (for incoming traffic from other devices)
+	// Populate SSL_DISPATCH
+	// If inspect-only mode is active, apply distinct rules for each allowed source IP.
+	// Otherwise, apply a global redirect.
+	if len(fm.inspectOnlyIPs) > 0 {
+		for _, ip := range fm.inspectOnlyIPs {
+			rule := []string{
+				"-t", "nat", "-A", "SSL_DISPATCH",
+				"-s", ip,
+				"-j", "SSLPROXY",
+			}
+			if err := fm.runIPTables(rule...); err != nil {
+				return fmt.Errorf("failed to apply SSL_DISPATCH rule for source %s: %v", ip, err)
+			}
+		}
+	} else {
+		rule := []string{
+			"-t", "nat", "-A", "SSL_DISPATCH",
+			"-j", "SSLPROXY",
+		}
+		if err := fm.runIPTables(rule...); err != nil {
+			return fmt.Errorf("failed to apply SSL_DISPATCH global rule: %v", err)
+		}
+	}
+
+	// Link PREROUTING to SSL_DISPATCH
+	// First, clean up any old direct links to SSLPROXY or SSL_DISPATCH
+	fm.cleanLegacyRules()
+
 	rule = []string{
 		"-t", "nat", "-A", "PREROUTING",
-		"-j", "SSLPROXY",
+		"-j", "SSL_DISPATCH",
 	}
 	if err := fm.runIPTables(rule...); err != nil {
-		return fmt.Errorf("failed to apply SSLPROXY chain: %v", err)
+		return fmt.Errorf("failed to link PREROUTING to SSL_DISPATCH: %v", err)
 	}
 	fm.rules = append(fm.rules, strings.Join(rule, " "))
 
@@ -176,7 +219,7 @@ func (fm *FirewallManager) Setup() error {
 	rule = []string{
 		"-t", "nat", "-A", "OUTPUT",
 		"-p", "tcp", "-m", "owner", "!", "--uid-owner", "0",
-		"-j", "SSLPROXY",
+		"-j", "SSL_DISPATCH",
 	}
 	if err := fm.runIPTables(rule...); err != nil {
 		logger.LogError(fmt.Sprintf("Failed to apply OUTPUT chain rule (non-critical): %v", err))
@@ -193,6 +236,9 @@ func (fm *FirewallManager) Setup() error {
 	if fm.blockQuic {
 		logger.LogInfo("Blocking QUIC (UDP/443)")
 	}
+	if len(fm.inspectOnlyIPs) > 0 {
+		logger.LogInfo(fmt.Sprintf("Inspection limited to %d source IPs", len(fm.inspectOnlyIPs)))
+	}
 	if len(fm.blockedIPs) > 0 {
 		logger.LogInfo(fmt.Sprintf("Blocking %d IPs/CIDRs at network layer", len(fm.blockedIPs)))
 	}
@@ -204,22 +250,24 @@ func (fm *FirewallManager) Setup() error {
 func (fm *FirewallManager) Cleanup() error {
 	logger.LogInfo("Reverting iptables rules...")
 
+	// Remove links from PREROUTING and OUTPUT
+	fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSL_DISPATCH")
+	fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSL_DISPATCH")
+
+	// Flush and delete SSL_DISPATCH
+	fm.runIPTables("-t", "nat", "-F", "SSL_DISPATCH")
+	fm.runIPTables("-t", "nat", "-X", "SSL_DISPATCH")
+
+	// Flush and delete SSLPROXY
 	fm.runIPTables("-t", "nat", "-F", "SSLPROXY")
-	fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSLPROXY")
-	fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSLPROXY")
 	fm.runIPTables("-t", "nat", "-X", "SSLPROXY")
+
 	if fm.blockQuic {
 		fm.runIPTables("-t", "filter", "-D", "FORWARD", "-p", "udp", "--dport", "443", "-j", "DROP")
 		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-p", "udp", "--dport", "443", "-j", "DROP")
 	}
 
-	// Cleanup blocking rules is handled by iterating stored rules in reverse order?
-	// Currently fm.rules stores the command args.
-	// To strictly clean up what we added:
-	// Reverse iterate fm.rules and delete?
-	// The current Cleanup implementation seems to hardcode deletions.
-	// We should probably iterate fm.rules and flip -A/-I to -D.
-	// However, simple approach for now:
+	// Cleanup blocking rules
 	for _, ip := range fm.blockedIPs {
 		fm.runIPTables("-t", "filter", "-D", "FORWARD", "-d", ip, "-j", "DROP")
 		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-d", ip, "-j", "DROP")
@@ -227,6 +275,32 @@ func (fm *FirewallManager) Cleanup() error {
 
 	logger.LogInfo("iptables rules cleaned up.")
 	return nil
+}
+
+func (fm *FirewallManager) cleanLegacyRules() {
+	// Best effort cleanup of any potential lingering rules
+	// We loop because there might be multiple entries if previous runs crashed hard
+	for {
+		if err := fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSLPROXY"); err != nil {
+			break
+		}
+	}
+	for {
+		if err := fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSL_DISPATCH"); err != nil {
+			break
+		}
+	}
+	// Also clean OUTPUT legacy
+	for {
+		if err := fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSLPROXY"); err != nil {
+			break
+		}
+	}
+	for {
+		if err := fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSL_DISPATCH"); err != nil {
+			break
+		}
+	}
 }
 
 func (fm *FirewallManager) enableIPForwarding() error {
