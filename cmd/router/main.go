@@ -18,6 +18,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
 
 const (
@@ -130,8 +131,19 @@ func main() {
 	// Ensure cleaner shutdown of firewall rules on interrupt
 	setupCleanupHandler(firewallManager)
 
-	httpHandler := proxy.NewHTTPHandler(blockList, bypassList)
-	httpsHandler := proxy.NewHTTPSHandler(certManager, blockList, bypassList)
+	rewriter := rewrites.NewEngine(rewrites.DefaultDir())
+	if stats, err := rewriter.LoadNow(); err != nil {
+		logger.LogError(fmt.Sprintf("Rewrite rules load failed: %v", err))
+	} else if stats.Enabled > 0 {
+		logger.LogInfo(fmt.Sprintf("Response tampering enabled: %d/%d rule(s) enabled from %s", stats.Enabled, stats.Total, rewriter.Dir()))
+	} else if stats.Total > 0 {
+		logger.LogInfo(fmt.Sprintf("Response tampering: %d rule(s) loaded but none enabled (dir: %s)", stats.Total, rewriter.Dir()))
+	} else {
+		logger.LogInfo(fmt.Sprintf("Response tampering: no rules found in %s", rewriter.Dir()))
+	}
+
+	httpHandler := proxy.NewHTTPHandler(blockList, bypassList, rewriter)
+	httpsHandler := proxy.NewHTTPSHandler(certManager, blockList, bypassList, rewriter)
 
 	logger.LogInfo("Router is active.")
 	logger.LogInfo(fmt.Sprintf("HTTP  -> :%d", HTTP_PROXY_PORT))

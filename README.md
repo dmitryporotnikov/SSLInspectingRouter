@@ -79,6 +79,13 @@ Console output displays only the source IP and requested FQDN. Detailed logs are
 
 * **Log Location:** `logs/traffic.db`
 
+## Response Tampering (Rewrites)
+
+The router can modify **HTTP and HTTPS responses on the fly** using rewrite rules stored in `rewrites/*.json`.
+
+* **Examples & format:** `rewrites/README.md`
+* **Reloading:** rules are auto-reloaded when files change (polling).
+
 ### Database Schema
 
 The database contains two primary tables: `Requests` and `Responses`.

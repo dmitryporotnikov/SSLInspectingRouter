@@ -70,7 +70,7 @@ func setupInMemoryTrafficDB(t *testing.T) *sql.DB {
 func TestHTTPBypassLogsBypassed(t *testing.T) {
 	testDB := setupInMemoryTrafficDB(t)
 
-	handler := proxy.NewHTTPHandler(nil, blocklist.NewBlockList([]string{"example.com"}))
+	handler := proxy.NewHTTPHandler(nil, blocklist.NewBlockList([]string{"example.com"}), nil)
 	handler.Client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -116,7 +116,7 @@ func TestHTTPSBypassSkipsCertGeneration(t *testing.T) {
 	// We might need to skip this check or use GetCertificateForHost to verify behavior.
 	// For now let's just create handler.
 
-	handler := proxy.NewHTTPSHandler(cm, nil, blocklist.NewBlockList([]string{"localhost"}))
+	handler := proxy.NewHTTPSHandler(cm, nil, blocklist.NewBlockList([]string{"localhost"}), nil)
 	clientConn, serverConn := net.Pipe()
 	done := make(chan struct{})
 

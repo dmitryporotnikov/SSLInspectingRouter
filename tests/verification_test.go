@@ -22,7 +22,7 @@ func TestTLSHandshakeFix(t *testing.T) {
 	}
 
 	// 2. Setup HTTPSHandler
-	handler := proxy.NewHTTPSHandler(cm, nil, nil)
+	handler := proxy.NewHTTPSHandler(cm, nil, nil, nil)
 
 	// 3. Start a listener to simulate the transparent proxy intercept
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

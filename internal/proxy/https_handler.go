@@ -9,11 +9,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
 
 // HTTPSHandler manages transparent HTTPS proxying.
@@ -23,10 +25,11 @@ type HTTPSHandler struct {
 	client      *http.Client
 	blockList   *blocklist.BlockList
 	bypassList  *blocklist.BlockList
+	rewriter    *rewrites.Engine
 }
 
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
-func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList) *HTTPSHandler {
+func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPSHandler {
 	return &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
@@ -42,6 +45,7 @@ func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockLi
 		},
 		blockList:  blockList,
 		bypassList: bypassList,
+		rewriter:   rewriter,
 	}
 }
 
@@ -176,6 +180,11 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	copyHeaders(proxyReq.Header, req.Header)
 	proxyReq.Host = hostname
 
+	if h.rewriter != nil && h.rewriter.ShouldForceGzip(req, hostname) {
+		// Avoid brotli upstream responses; we only support body tampering for identity/gzip/deflate.
+		proxyReq.Header.Set("Accept-Encoding", "gzip")
+	}
+
 	resp, err := h.client.Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
@@ -184,6 +193,56 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		return
 	}
 	defer resp.Body.Close()
+
+	var rewritePlan *rewrites.Plan
+	if h.rewriter != nil {
+		plan, err := h.rewriter.Plan(req, hostname, resp.StatusCode, resp.Header)
+		if err != nil {
+			logger.LogError(fmt.Sprintf("Rewrite rules reload failed: %v", err))
+		}
+		rewritePlan = plan
+	}
+
+	if rewritePlan != nil {
+		rewritePlan.ApplyHeaders(resp.Header)
+		if rewritePlan.NeedsBody() && !shouldSkipBodyTampering(resp.StatusCode, resp.Header) {
+			rawBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTamperBodyBytes+1))
+			if err != nil {
+				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
+				sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
+				logger.LogHTTPSResponse(reqID, sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+				return
+			}
+
+			if len(rawBody) > maxTamperBodyBytes {
+				// Too large (or effectively streaming). Restore the body and forward it unchanged.
+				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(rawBody), resp.Body))
+				logger.LogDebug(fmt.Sprintf("HTTPS tamper skipped (body too large): %s %s -> %d", req.Method, fullURL, resp.StatusCode))
+			} else {
+				outBody, _, err := rewritePlan.RewriteBody(resp.Header, rawBody)
+				if err != nil {
+					logger.LogError(fmt.Sprintf("Response tampering failed (sending original body): %v", err))
+					outBody = rawBody
+				}
+
+				resp.Body = io.NopCloser(bytes.NewReader(outBody))
+				resp.ContentLength = int64(len(outBody))
+				resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
+				resp.Header.Del("Transfer-Encoding")
+
+				preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
+				_, _ = preview.Write(outBody)
+
+				if err := resp.Write(tlsConn); err != nil {
+					logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
+					return
+				}
+				logger.LogHTTPSResponse(reqID, sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+				logger.LogDebug(fmt.Sprintf("HTTPS completed (tampered): %s %s -> %d", req.Method, fullURL, resp.StatusCode))
+				return
+			}
+		}
+	}
 
 	preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
 	tee := io.TeeReader(resp.Body, preview)

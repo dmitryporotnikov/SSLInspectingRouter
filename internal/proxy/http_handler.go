@@ -6,10 +6,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
 
 // HTTPHandler implements a transparent HTTP proxy.
@@ -17,10 +19,11 @@ type HTTPHandler struct {
 	Client     *http.Client
 	blockList  *blocklist.BlockList
 	bypassList *blocklist.BlockList
+	rewriter   *rewrites.Engine
 }
 
 // NewHTTPHandler creates a new HTTP proxy handler.
-func NewHTTPHandler(blockList *blocklist.BlockList, bypassList *blocklist.BlockList) *HTTPHandler {
+func NewHTTPHandler(blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPHandler {
 	return &HTTPHandler{
 		Client: &http.Client{
 			// Manual redirect handling for transparency
@@ -30,6 +33,7 @@ func NewHTTPHandler(blockList *blocklist.BlockList, bypassList *blocklist.BlockL
 		},
 		blockList:  blockList,
 		bypassList: bypassList,
+		rewriter:   rewriter,
 	}
 }
 
@@ -73,6 +77,11 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	copyHeaders(proxyReq.Header, r.Header)
 
+	if h.rewriter != nil && !bypassed && h.rewriter.ShouldForceGzip(r, targetHost) {
+		// Avoid brotli upstream responses; we only support body tampering for identity/gzip/deflate.
+		proxyReq.Header.Set("Accept-Encoding", "gzip")
+	}
+
 	if proxyReq.Host == "" {
 		proxyReq.Host = r.Host
 	}
@@ -90,14 +99,76 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	copyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
 	if bypassed {
+		copyHeaders(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
 		_, _ = io.Copy(w, resp.Body)
 		logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		logger.LogDebug(fmt.Sprintf("HTTP bypassed: %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 		return
 	}
+
+	var rewritePlan *rewrites.Plan
+	if h.rewriter != nil {
+		plan, err := h.rewriter.Plan(r, targetHost, resp.StatusCode, resp.Header)
+		if err != nil {
+			logger.LogError(fmt.Sprintf("Rewrite rules reload failed: %v", err))
+		}
+		rewritePlan = plan
+	}
+
+	if rewritePlan != nil {
+		rewritePlan.ApplyHeaders(resp.Header)
+
+		if rewritePlan.NeedsBody() && !shouldSkipBodyTampering(resp.StatusCode, resp.Header) {
+			rawBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTamperBodyBytes+1))
+			if err != nil {
+				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
+				http.Error(w, "Bad Gateway", http.StatusBadGateway)
+				logger.LogHTTPResponse(reqID, sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+				return
+			}
+
+			if len(rawBody) > maxTamperBodyBytes {
+				// Too large (or effectively streaming). Fall back to forwarding the original body.
+				copyHeaders(w.Header(), resp.Header)
+				w.WriteHeader(resp.StatusCode)
+
+				preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
+				_, _ = preview.Write(rawBody)
+				_, _ = w.Write(rawBody)
+
+				tee := io.TeeReader(resp.Body, preview)
+				_, _ = io.Copy(w, tee)
+
+				logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+				logger.LogDebug(fmt.Sprintf("HTTP completed (tamper skipped: body too large): %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
+				return
+			}
+
+			outBody, _, err := rewritePlan.RewriteBody(resp.Header, rawBody)
+			if err != nil {
+				logger.LogError(fmt.Sprintf("Response tampering failed (sending original body): %v", err))
+				outBody = rawBody
+			}
+
+			resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
+			resp.Header.Del("Transfer-Encoding")
+
+			copyHeaders(w.Header(), resp.Header)
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(outBody)
+
+			preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
+			_, _ = preview.Write(outBody)
+			logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+			logger.LogDebug(fmt.Sprintf("HTTP completed (tampered): %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
+			return
+		}
+	}
+
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
 
 	preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
 	tee := io.TeeReader(resp.Body, preview)
