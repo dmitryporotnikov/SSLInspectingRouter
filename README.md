@@ -6,6 +6,27 @@ This repository contains a transparent interception proxy written in Go for HTTP
 
 ## How It Works
 
+```
++--------+                 +-------------------------+                 +------------+
+| Client | <=============> |   SSLInspectingRouter   | <=============> | Destination|
++--------+   (HTTP/HTTPS)  +-------------------------+  (HTTP/HTTPS)   +------------+
+                           ^          |          ^           |
+                           |          v          |           v
+                           |     Decrypt     Re-encrypt      |
+                           |                                 |
+                           |                                 |
+                           |        Inspect & Process        |
+                           |                                 |
+                           |  - Log to SQLite traffic.db     |
+                           |  - Display on Dashboard         |
+                           |  - Optional Content Rewrites    |
+                           |                                 |
+                           +---------------------------------+
+                                             |
+                                             v
+                                      Export PCAP File
+```
+
 The application operates by manipulating the `iptables` `nat` table. It creates a custom `SSLPROXY` chain linked to the `PREROUTING` hook to manage traffic redirection:
 
 * **HTTP (Port 80):** Redirected to the local handler on port **8080**.
