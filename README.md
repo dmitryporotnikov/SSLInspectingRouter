@@ -10,7 +10,7 @@ This repository contains a transparent interception proxy written in Go for HTTP
 +--------+                 +-------------------------+                 +------------+
 | Client | <=============> |   SSLInspectingRouter   | <=============> | Destination|
 +--------+   (HTTP/HTTPS)  +-------------------------+  (HTTP/HTTPS)   +------------+
-                           ^          |          ^           |
+              default GW   ^          |          ^           |
                            |          v          |           v
                            |     Decrypt     Re-encrypt      |
                            |                                 |
@@ -24,6 +24,7 @@ This repository contains a transparent interception proxy written in Go for HTTP
                            +---------------------------------+
                                              |
                                              v
+                                        (Optionally)
                                       Export PCAP File
 ```
 
