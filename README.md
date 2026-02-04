@@ -88,6 +88,14 @@ sudo ./sslinspectingrouter -drop test.com,test2.com
 
 *(This will block `test.com`, `www.test.com`, `test2.com`, etc.)*
 
+**Example: Combining multiple parameters**
+
+You can combine multiple flags. For example, to block specific domains, start the web dashboard on port 3000, and truncate logs:
+
+```bash
+sudo ./sslinspectingrouter -drop test.com,test2.com -web :3000 -truncatelog
+```
+
 ### Shutdown
 
 The application listens for `SIGINT` and `SIGTERM` signals. When received, it initiates a graceful shutdown:
