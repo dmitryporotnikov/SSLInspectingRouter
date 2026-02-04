@@ -2,11 +2,11 @@
 
 ![Banner](banner.jpg)
 
+This repository contains a transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It utilizes the kernel packet filtering framework to redirect web traffic to local userspace listeners.
+
 ## Demo
 
 ![Preview](preview.gif)
-
-This repository contains a transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It utilizes the kernel packet filtering framework to redirect web traffic to local userspace listeners.
 
 ## How It Works
 
