@@ -8,21 +8,29 @@ import (
 	"io/fs"
 	"net/http"
 
+	"strconv"
+
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
 
 //go:embed static/*
 var staticFiles embed.FS
 
 type Server struct {
-	db   *sql.DB
-	addr string
+	db           *sql.DB
+	addr         string
+	httpsHandler *proxy.HTTPSHandler
+	rewriter     *rewrites.Engine
 }
 
-func Start(db *sql.DB, addr string) error {
+func Start(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler, rewriter *rewrites.Engine) error {
 	s := &Server{
-		db:   db,
-		addr: addr,
+		db:           db,
+		addr:         addr,
+		httpsHandler: httpsHandler,
+		rewriter:     rewriter,
 	}
 
 	mux := http.NewServeMux()
@@ -33,6 +41,8 @@ func Start(db *sql.DB, addr string) error {
 
 	// API endpoints
 	mux.HandleFunc("/api/traffic", s.handleTraffic)
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/rewrites", s.handleRewrites)
 
 	logger.LogInfo(fmt.Sprintf("Dashboard listening on http://localhost%s", addr))
 	return http.ListenAndServe(addr, mux)
@@ -64,15 +74,23 @@ func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simple query: Get latest 50 requests
-	rows, err := s.db.Query(`
+	// Simple query: Get latest N requests
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if limitStr != "" {
+		if val, err := strconv.Atoi(limitStr); err == nil && val > 0 {
+			limit = val
+		}
+	}
+
+	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT 
 			r.id, r.timestamp, r.source_ip, r.fqdn, r.request,
 			COALESCE(res.response, '') as response_line
 		FROM Requests r
 		LEFT JOIN Responses res ON r.id = res.id
-		ORDER BY r.id DESC LIMIT 50
-	`)
+		ORDER BY r.id DESC LIMIT %d
+	`, limit))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -156,4 +174,49 @@ func (s *Server) handleTrafficDetail(w http.ResponseWriter, id string) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(d)
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var payload struct {
+			InspectionEnabled bool `json:"inspection_enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if s.httpsHandler != nil {
+			s.httpsHandler.SetInspection(payload.InspectionEnabled)
+		}
+	}
+
+	size, _ := logger.GetTrafficDBSize()
+	inspectionEnabled := true
+	if s.httpsHandler != nil {
+		inspectionEnabled = s.httpsHandler.IsInspectionEnabled()
+	}
+
+	resp := struct {
+		DBSizeBytes       int64 `json:"db_size_bytes"`
+		InspectionEnabled bool  `json:"inspection_enabled"`
+	}{
+		DBSizeBytes:       size,
+		InspectionEnabled: inspectionEnabled,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleRewrites(w http.ResponseWriter, r *http.Request) {
+	var rules []rewrites.Rule
+	if s.rewriter != nil {
+		rules = s.rewriter.ListRules()
+	}
+	// Return empty list if nil, for easier JSON parsing
+	if rules == nil {
+		rules = []rewrites.Rule{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules)
 }

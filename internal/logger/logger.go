@@ -129,6 +129,19 @@ func CloseLogger() {
 	}
 }
 
+// GetTrafficDBSize returns the size of the SQLite database file in bytes.
+func GetTrafficDBSize() (int64, error) {
+	dbPath := resolveDBPath()
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
 func LogInfo(message string) {
 	log.Printf("[INFO] %s\n", message)
 }

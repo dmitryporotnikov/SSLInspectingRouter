@@ -14,9 +14,33 @@
         <header class="top-bar">
             <div class="header-left">
                 <div class="logo">🔒 SSL Inspecting Router</div>
-                <div class="status-pill">
+                <div class="status-pill" id="connection-status">
                     <div id="status-led" class="led"></div>
                     <span id="status-text">Live</span>
+                </div>
+            </div>
+            <div class="header-right" style="display: flex; align-items: center; gap: 15px;">
+                <div class="control-group">
+                    <span class="label">DB:</span>  <span id="db-size" style="color: var(--accent)">-</span>
+                </div>
+                 <div class="control-group">
+                    <button class="btn-secondary" onclick="openRules()">Rules</button>
+                </div>
+                <div class="control-group">
+                    <label for="limit-select" class="label">Limit:</label>
+                    <select id="limit-select" onchange="updateLimit()">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label class="switch">
+                        <input type="checkbox" id="inspection-toggle" onchange="toggleInspection()">
+                        <span class="slider round"></span>
+                    </label>
+                    <span class="label">Inspection</span>
                 </div>
             </div>
         </header>
@@ -45,7 +69,7 @@
         <div id="modal-overlay" class="modal-overlay hidden">
             <div class="modal">
                 <div class="modal-header">
-                    <h2>Traffic Details</h2>
+                    <h2 id="modal-title">Traffic Details</h2>
                     <button id="modal-close" class="close-btn">&times;</button>
                 </div>
                 <div class="modal-body" id="modal-content">

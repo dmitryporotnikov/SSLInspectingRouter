@@ -30,7 +30,8 @@ type Engine struct {
 }
 
 type ruleSet struct {
-	rules []compiledRule
+	rules    []compiledRule
+	rawRules []Rule
 }
 
 type Stats struct {
@@ -52,6 +53,12 @@ func (e *Engine) Dir() string {
 	return e.dir
 }
 
+// ListRules returns the currently active rewrite rules.
+func (e *Engine) ListRules() []Rule {
+	rs := e.rules.Load().(ruleSet)
+	return rs.rawRules
+}
+
 // LoadNow forces a rules reload and returns rule stats.
 // If an error occurs, previously loaded rules remain active.
 func (e *Engine) LoadNow() (Stats, error) {
@@ -63,21 +70,21 @@ func (e *Engine) LoadNow() (Stats, error) {
 		return e.rules.Load().(ruleSet).stats(), sigErr
 	}
 
-	compiled, loadErr := loadAndCompileRules(e.dir)
+	compiled, raw, loadErr := loadAndCompileRules(e.dir)
 	e.lastSig = sig
 	if loadErr != nil {
 		return e.rules.Load().(ruleSet).stats(), loadErr
 	}
 
-	e.rules.Store(ruleSet{rules: compiled})
+	e.rules.Store(ruleSet{rules: compiled, rawRules: raw})
 	return (ruleSet{rules: compiled}).stats(), nil
 }
 
 // DefaultDir returns the preferred rewrites directory.
 // Resolution order:
-//  1) $SSLINSPECTINGROUTER_REWRITES_DIR if set
-//  2) ./rewrites if it exists
-//  3) <exeDir>/rewrites (may not exist)
+//  1. $SSLINSPECTINGROUTER_REWRITES_DIR if set
+//  2. ./rewrites if it exists
+//  3. <exeDir>/rewrites (may not exist)
 func DefaultDir() string {
 	if v := strings.TrimSpace(os.Getenv("SSLINSPECTINGROUTER_REWRITES_DIR")); v != "" {
 		return v
@@ -167,13 +174,13 @@ func (e *Engine) maybeReload(now time.Time) error {
 		return nil
 	}
 
-	compiled, loadErr := loadAndCompileRules(e.dir)
+	compiled, raw, loadErr := loadAndCompileRules(e.dir)
 	e.lastSig = sig
 	if loadErr != nil {
 		return loadErr
 	}
 
-	e.rules.Store(ruleSet{rules: compiled})
+	e.rules.Store(ruleSet{rules: compiled, rawRules: raw})
 	return nil
 }
 
@@ -232,13 +239,13 @@ func dirSignature(dir string) (string, error) {
 	return b.String(), nil
 }
 
-func loadAndCompileRules(dir string) ([]compiledRule, error) {
+func loadAndCompileRules(dir string) ([]compiledRule, []Rule, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	var fileNames []string
@@ -254,28 +261,31 @@ func loadAndCompileRules(dir string) ([]compiledRule, error) {
 	sort.Strings(fileNames)
 
 	var out []compiledRule
+	var rawOut []Rule
 	for _, name := range fileNames {
 		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		rules, err := parseRuleFile(data)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return nil, nil, fmt.Errorf("%s: %w", name, err)
 		}
+
+		rawOut = append(rawOut, rules...)
 
 		for i, rule := range rules {
 			compiled, err := compileRule(rule, fmt.Sprintf("%s#%d", name, i+1))
 			if err != nil {
-				return nil, fmt.Errorf("%s: %w", name, err)
+				return nil, nil, fmt.Errorf("%s: %w", name, err)
 			}
 			out = append(out, compiled)
 		}
 	}
 
-	return out, nil
+	return out, rawOut, nil
 }
 
 func parseRuleFile(data []byte) ([]Rule, error) {
