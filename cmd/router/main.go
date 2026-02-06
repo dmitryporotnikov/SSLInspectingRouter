@@ -42,6 +42,7 @@ func main() {
 	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
 	flag.Parse()
 
+	logger.SetConsoleRequestLogging(*webFlag == "")
 	logger.SetLogTruncation(*truncateLog)
 	if *wipeDB {
 		if err := logger.WipeLogDB(); err != nil {
@@ -170,7 +171,7 @@ func main() {
 		logger.LogInfo(fmt.Sprintf("Bypass list enabled (%d entries)", bypassList.Count()))
 	}
 	logger.LogInfo("CA Path: ca-cert.pem")
-	logger.LogInfo("Logs: logs/http.log, logs/https.log")
+	logger.LogInfo("Logs: SQLite traffic.db in Logs directory")
 	logger.LogInfo("Install ca-cert.pem to system trust store to prevent browser warnings.")
 	logger.LogInfo("Press Ctrl+C to stop.")
 

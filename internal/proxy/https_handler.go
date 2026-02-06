@@ -23,13 +23,29 @@ import (
 type HTTPSHandler struct {
 	certManager *cert.CertManager
 	client      *http.Client
+	ipClient    *http.Client
 	blockList   *blocklist.BlockList
 	bypassList  *blocklist.BlockList
 	rewriter    *rewrites.Engine
 }
 
+var errNoSNI = errors.New("no SNI found in ClientHello")
+
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
 func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPSHandler {
+	baseTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // Verify upstream certificates by default.
+		},
+	}
+	ipTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			// IP-based transparent targets commonly present hostname certs.
+			// Skip upstream cert verification for IP endpoints to avoid false 502 errors.
+			InsecureSkipVerify: true,
+		},
+	}
+
 	return &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
@@ -37,11 +53,14 @@ func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockLi
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: false, // Verify upstream certificates by default
-				},
+			Transport: baseTransport,
+		},
+		ipClient: &http.Client{
+			// Keep redirect behavior consistent with the main client.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
 			},
+			Transport: ipTransport,
 		},
 		blockList:  blockList,
 		bypassList: bypassList,
@@ -66,11 +85,20 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	hostname, peekedBytes, err := h.extractSNI(conn)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
+		if errors.Is(err, errNoSNI) && upstreamAddr != "" {
+			hostname = upstreamAddr
+			logger.LogDebug(fmt.Sprintf("SNI missing; using original destination IP %s", hostname))
+		} else {
+			logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
+			return
+		}
+	}
+	if hostname == "" {
+		logger.LogError("SNI extraction failed: TLS target host is empty")
 		return
 	}
 
-	logger.LogDebug(fmt.Sprintf("SNI hostname: %s", hostname))
+	logger.LogDebug(fmt.Sprintf("TLS target host: %s", hostname))
 
 	if h.blockList != nil && h.blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
@@ -212,7 +240,12 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		proxyReq.Header.Set("Accept-Encoding", "gzip")
 	}
 
-	resp, err := h.client.Do(proxyReq)
+	upstreamClient := h.client
+	if net.ParseIP(hostname) != nil {
+		upstreamClient = h.ipClient
+	}
+
+	resp, err := upstreamClient.Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
@@ -305,7 +338,7 @@ func (h *HTTPSHandler) extractSNI(conn net.Conn) (string, []byte, error) {
 
 	hostname := parseSNI(buf[:n])
 	if hostname == "" {
-		return "", nil, fmt.Errorf("no SNI found in ClientHello")
+		return "", buf[:n], errNoSNI
 	}
 
 	return hostname, buf[:n], nil

@@ -2,7 +2,7 @@
 
 # setup.sh - Prepares the environment and builds the router.
 # Usage: sudo ./scripts/setup.sh
-
+export PATH="$PATH:/usr/local/go/bin"
 set -e
 
 echo "SSLProxy Setup"

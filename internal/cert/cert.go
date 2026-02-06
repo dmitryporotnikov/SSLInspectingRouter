@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -192,9 +193,13 @@ func (cm *CertManager) GetCertificateForHost(hostname string) (*CertPair, error)
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
-		DNSNames:              []string{hostname},
 		SubjectKeyId:          hostKeyID,
 		AuthorityKeyId:        cm.caCert.SubjectKeyId,
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		hostTemplate.IPAddresses = []net.IP{ip}
+	} else {
+		hostTemplate.DNSNames = []string{hostname}
 	}
 
 	hostCertDER, err := x509.CreateCertificate(rand.Reader, hostTemplate, cm.caCert, &hostKey.PublicKey, cm.caKey)

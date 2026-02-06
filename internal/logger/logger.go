@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
@@ -19,6 +20,7 @@ import (
 var (
 	logMutex     sync.Mutex
 	consoleMutex sync.Mutex
+	consoleLogs  atomic.Bool
 	DB           *sql.DB
 )
 
@@ -42,9 +44,14 @@ func LogBodyLimit() int {
 }
 
 func init() {
+	consoleLogs.Store(true)
 	if consoleRequestsOnly {
 		log.SetOutput(io.Discard)
 	}
+}
+
+func SetConsoleRequestLogging(enabled bool) {
+	consoleLogs.Store(enabled)
 }
 
 // InitLogger sets up SQLite logging for HTTP and HTTPS traffic in the software directory.
@@ -136,6 +143,9 @@ func LogDebug(message string) {
 
 // LogConsoleRequest prints only the source IP and FQDN to the console.
 func LogConsoleRequest(sourceIP, fqdn string) {
+	if !consoleLogs.Load() {
+		return
+	}
 	if sourceIP == "" || fqdn == "" {
 		return
 	}
