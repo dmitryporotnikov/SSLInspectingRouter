@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # setup.sh - Prepares the environment and builds the router.
-# Usage: sudo ./setup.sh
+# Usage: sudo ./scripts/setup.sh
 
 set -e
 

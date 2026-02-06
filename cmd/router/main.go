@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/banner"
@@ -32,6 +35,7 @@ func main() {
 	inspectOnlyFlag := flag.String("inspectonly", "", "comma-separated IPs to inspect (if set, only these IPs are intercepted)")
 	newCACert := flag.Bool("newcacert", false, "generate a new CA certificate and key")
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
+	portsFlag := flag.String("ports", "", "comma-separated additional TLS destination ports to inspect (e.g. 8443,9443)")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
 	wipeDB := flag.Bool("wipedb", false, "delete the traffic database before startup")
 	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
@@ -49,6 +53,11 @@ func main() {
 	blockList := blocklist.NewBlockList(dropList)
 	bypassList := blocklist.NewBlockList(blocklist.ParseDropList(*bypassFlag))
 	inspectOnlyList := blocklist.ParseDropList(*inspectOnlyFlag) // Reusing ParseDropList as it splits comma-separated strings
+	additionalTLSPorts, err := parseAdditionalPorts(*portsFlag)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Invalid -ports value: %v", err))
+		os.Exit(1)
+	}
 
 	banner.PrintBanner()
 
@@ -91,6 +100,9 @@ func main() {
 	}
 
 	firewallManager := firewall.NewFirewallManager(HTTP_PROXY_PORT, HTTPS_PROXY_PORT)
+	if len(additionalTLSPorts) > 0 {
+		firewallManager.EnableAdditionalTLSPorts(additionalTLSPorts)
+	}
 	if !*allowQUIC {
 		firewallManager.EnableQUICBlock()
 		logger.LogInfo("QUIC blocking enabled.")
@@ -148,6 +160,9 @@ func main() {
 	logger.LogInfo("Router is active.")
 	logger.LogInfo(fmt.Sprintf("HTTP  -> :%d", HTTP_PROXY_PORT))
 	logger.LogInfo(fmt.Sprintf("HTTPS -> :%d", HTTPS_PROXY_PORT))
+	if len(additionalTLSPorts) > 0 {
+		logger.LogInfo(fmt.Sprintf("Extra TLS ports intercepted: %s", portsToString(additionalTLSPorts)))
+	}
 	if dnsProxy != nil {
 		logger.LogInfo(fmt.Sprintf("DNS   -> :%d (drop enabled)", dnsproxy.DNS_PROXY_PORT))
 	}
@@ -209,4 +224,49 @@ func setupCleanupHandler(firewallManager *firewall.FirewallManager) {
 		logger.LogInfo("Clean shutdown complete.")
 		os.Exit(0)
 	}()
+}
+
+func parseAdditionalPorts(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	parts := strings.Split(raw, ",")
+	seen := make(map[int]struct{}, len(parts))
+	ports := make([]int, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		port, err := strconv.Atoi(part)
+		if err != nil || port < 1 || port > 65535 {
+			return nil, fmt.Errorf("invalid port %q", part)
+		}
+		// 80 and 443 are already intercepted by default.
+		if port == 80 || port == 443 {
+			continue
+		}
+		if _, exists := seen[port]; exists {
+			continue
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+
+	sort.Ints(ports)
+	return ports, nil
+}
+
+func portsToString(ports []int) string {
+	if len(ports) == 0 {
+		return ""
+	}
+	values := make([]string, 0, len(ports))
+	for _, port := range ports {
+		values = append(values, strconv.Itoa(port))
+	}
+	return strings.Join(values, ",")
 }

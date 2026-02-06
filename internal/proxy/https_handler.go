@@ -57,6 +57,13 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	sourceIP := sourceIPFromAddr(conn.RemoteAddr())
 	logger.LogDebug(fmt.Sprintf("HTTPS connection from %s", sourceIP))
 
+	upstreamAddr, upstreamPort, err := getOriginalDestination(conn)
+	if err != nil {
+		upstreamAddr = ""
+		upstreamPort = 443
+		logger.LogDebug(fmt.Sprintf("Original destination lookup unavailable, defaulting to :443: %v", err))
+	}
+
 	hostname, peekedBytes, err := h.extractSNI(conn)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
@@ -74,7 +81,7 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	if h.bypassList != nil && h.bypassList.Matches(hostname) {
 		reqID := logger.LogBypassedRequest(sourceIP, hostname)
-		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort)
 		return
 	}
 
@@ -106,13 +113,21 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	}
 	defer tlsConn.Close()
 
-	h.handleHTTPSRequest(tlsConn, hostname, sourceIP)
+	h.handleHTTPSRequest(tlsConn, hostname, sourceIP, upstreamPort)
 }
 
-func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64) {
-	upstreamConn, err := net.DialTimeout("tcp", net.JoinHostPort(hostname, "443"), 10*time.Second)
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64, upstreamAddr string, upstreamPort int) {
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	dialHost := hostname
+	if upstreamAddr != "" {
+		dialHost = upstreamAddr
+	}
+	dialTarget := net.JoinHostPort(dialHost, strconv.Itoa(upstreamPort))
+	upstreamConn, err := net.DialTimeout("tcp", dialTarget, 10*time.Second)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s: %v", hostname, err))
+		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s (%s): %v", hostname, dialTarget, err))
 		logger.LogBypassedResponse(reqID, sourceIP, hostname)
 		return
 	}
@@ -153,7 +168,7 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 }
 
 // handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.
-func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP string) {
+func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP string, upstreamPort int) {
 	req, err := http.ReadRequest(bufioReaderFromConn(tlsConn))
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Failed to read HTTPS request: %v", err))
@@ -166,7 +181,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
-	fullURL := fmt.Sprintf("https://%s%s", hostname, req.URL.RequestURI())
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	upstreamAuthority := hostname
+	if upstreamPort != 443 {
+		upstreamAuthority = net.JoinHostPort(hostname, strconv.Itoa(upstreamPort))
+	}
+
+	fullURL := fmt.Sprintf("https://%s%s", upstreamAuthority, req.URL.RequestURI())
 
 	reqID := logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
 
@@ -178,7 +201,11 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	}
 
 	copyHeaders(proxyReq.Header, req.Header)
-	proxyReq.Host = hostname
+	if req.Host != "" {
+		proxyReq.Host = req.Host
+	} else {
+		proxyReq.Host = upstreamAuthority
+	}
 
 	if h.rewriter != nil && h.rewriter.ShouldForceGzip(req, hostname) {
 		// Avoid brotli upstream responses; we only support body tampering for identity/gzip/deflate.
