@@ -84,14 +84,6 @@ func main() {
 		}
 	}
 
-	if *webFlag != "" {
-		go func() {
-			if err := dashboard.Start(logger.DB, *webFlag); err != nil {
-				logger.LogError(fmt.Sprintf("Dashboard server failed: %v", err))
-			}
-		}()
-	}
-
 	logger.LogInfo("Initializing services...")
 
 	certManager, err := cert.NewCertManager(*newCACert)
@@ -157,6 +149,14 @@ func main() {
 
 	httpHandler := proxy.NewHTTPHandler(blockList, bypassList, rewriter)
 	httpsHandler := proxy.NewHTTPSHandler(certManager, blockList, bypassList, rewriter)
+
+	if *webFlag != "" {
+		go func() {
+			if err := dashboard.Start(logger.DB, *webFlag, httpsHandler, rewriter); err != nil {
+				logger.LogError(fmt.Sprintf("Dashboard server failed: %v", err))
+			}
+		}()
+	}
 
 	logger.LogInfo("Router is active.")
 	logger.LogInfo(fmt.Sprintf("HTTP  -> :%d", HTTP_PROXY_PORT))

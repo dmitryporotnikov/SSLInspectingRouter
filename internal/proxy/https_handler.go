@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
@@ -21,12 +22,13 @@ import (
 // HTTPSHandler manages transparent HTTPS proxying.
 // It intercepts TLS connections, performs MITM to inspect traffic, and forwards requests.
 type HTTPSHandler struct {
-	certManager *cert.CertManager
-	client      *http.Client
-	ipClient    *http.Client
-	blockList   *blocklist.BlockList
-	bypassList  *blocklist.BlockList
-	rewriter    *rewrites.Engine
+	certManager       *cert.CertManager
+	client            *http.Client
+	ipClient          *http.Client
+	blockList         *blocklist.BlockList
+	bypassList        *blocklist.BlockList
+	rewriter          *rewrites.Engine
+	inspectionEnabled atomic.Bool
 }
 
 var errNoSNI = errors.New("no SNI found in ClientHello")
@@ -46,7 +48,7 @@ func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockLi
 		},
 	}
 
-	return &HTTPSHandler{
+	h := &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
 			// Prevent automatic redirect following to maintain transparent proxy behavior
@@ -66,6 +68,18 @@ func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockLi
 		bypassList: bypassList,
 		rewriter:   rewriter,
 	}
+	h.inspectionEnabled.Store(true)
+	return h
+}
+
+// SetInspection enables or disables SSL inspection.
+func (h *HTTPSHandler) SetInspection(enabled bool) {
+	h.inspectionEnabled.Store(enabled)
+}
+
+// IsInspectionEnabled returns the current state of SSL inspection.
+func (h *HTTPSHandler) IsInspectionEnabled() bool {
+	return h.inspectionEnabled.Load()
 }
 
 // HandleConnection intercepts a raw TCP connection, performs SNI sniffing,
@@ -99,6 +113,13 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	}
 
 	logger.LogDebug(fmt.Sprintf("TLS target host: %s", hostname))
+
+	if !h.IsInspectionEnabled() {
+		logger.LogInfo(fmt.Sprintf("Inspection disabled: tunneling %s from %s", hostname, sourceIP))
+		reqID := logger.LogTLSRequest(sourceIP, hostname, "INSPECTION DISABLED")
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort)
+		return
+	}
 
 	if h.blockList != nil && h.blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))

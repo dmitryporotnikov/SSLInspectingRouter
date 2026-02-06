@@ -26,3 +26,8 @@ go.work.sum
 
 # Mac Sportlight
 .DS_Store
+
+# All kind of certs
+ca-cert.pem
+ca-key.pem
+ca-req.pem
