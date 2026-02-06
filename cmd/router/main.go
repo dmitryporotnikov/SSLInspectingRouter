@@ -59,6 +59,8 @@ func main() {
 		logger.LogError(fmt.Sprintf("Invalid -ports value: %v", err))
 		os.Exit(1)
 	}
+	// Starting the software router
+	fmt.Println("Starting...")
 
 	banner.PrintBanner()
 
