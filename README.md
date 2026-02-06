@@ -32,12 +32,20 @@ This repository contains a transparent interception proxy written in Go for HTTP
                                       Export PCAP File
 ```
 
-The application operates by manipulating the `iptables` `nat` table. It creates a custom `SSLPROXY` chain linked to the `PREROUTING` hook to manage traffic redirection:
+The application operates by manipulating `iptables` in both `nat` and `filter` tables.
+It creates custom chains (`SSLPROXY`, `SSL_DISPATCH`) linked to `PREROUTING` and optional `OUTPUT` hooks to manage transparent redirection:
 
 * **HTTP (Port 80):** Redirected to the local handler on port **8080**.
 * **HTTPS (Port 443):** Redirected to the local handler on port **8443**.
+* **Additional TLS ports (`-ports`)**: Redirected to the same HTTPS handler on **8443** while preserving the original destination port for upstream forwarding.
 
-The `FirewallManager` (located in `firewall.go`) manages these rules and ensures the environment is restored when the process ends.
+To make the Linux host function as an actual gateway, `FirewallManager` also:
+
+* enables IPv4 forwarding (`net.ipv4.ip_forward=1`);
+* allows forwarding in `filter/FORWARD` (new + established/related);
+* applies `nat/POSTROUTING MASQUERADE` on the detected default egress interface.
+
+This is what allows routed client traffic to pass through the box instead of being blackholed.
 
 ### SSL/TLS Interception
 For encrypted traffic, the proxy acts as a Certificate Authority (CA). It dynamically generates certificates for each host on demand (`cert.go`).
@@ -50,7 +58,7 @@ A setup script is provided to automate environment configuration. It enables IPv
 To build the project:
 
 ```bash
-sudo ./setup.sh
+sudo ./scripts/setup.sh
 ```
 
 If the build is successful, a binary named `sslinspectingrouter` will be created in the project root.
@@ -75,6 +83,7 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are
 | --- | --- |
 | `sudo ./sslinspectingrouter -newcacert` | Force regeneration of the CA certificate and key. |
 | `sudo ./sslinspectingrouter -allowquic` | Allow QUIC (UDP/443) traffic. By default, QUIC is blocked to enforce HTTPS over TCP. |
+| `sudo ./sslinspectingrouter -ports 8443,9443` | Inspect additional TLS destination ports (comma-separated). Useful for non-standard HTTPS services. |
 | `sudo ./sslinspectingrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
 | `sudo ./sslinspectingrouter -web <port>` | Start the Web Dashboard on the specified port (e.g., `:3000`). |
 | `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database before startup. |
@@ -100,12 +109,19 @@ You can combine multiple flags. For example, to block specific domains, start th
 sudo ./sslinspectingrouter -drop test.com,test2.com -web :3000 -truncatelog
 ```
 
+**Example: Inspect non-standard TLS ports**
+
+```bash
+sudo ./sslinspectingrouter -ports 8443,9443
+```
+
 ### Shutdown
 
 The application listens for `SIGINT` and `SIGTERM` signals. When received, it initiates a graceful shutdown:
 
 1. Flushes the `SSLPROXY` chain from iptables.
 2. Removes redirection rules to prevent network blackholing.
+3. Removes forwarding/NAT pass-through rules created for gateway mode.
 
 ## Logging
 

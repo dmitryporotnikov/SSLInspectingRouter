@@ -1,42 +1,60 @@
 package firewall
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
 
+const (
+	forwardEstablishedRuleComment = "SSLINSPECT_FWD_EST"
+	forwardAllowRuleComment       = "SSLINSPECT_FWD_ALL"
+	masqueradeRuleComment         = "SSLINSPECT_MASQ"
+)
+
 // FirewallManager handles the configuration of iptables rules to transparently intercept traffic.
 type FirewallManager struct {
-	httpPort       int
-	httpsPort      int
-	dnsPort        int
-	enableDNS      bool
-	blockQuic      bool
-	blockedIPs     []string
-	inspectOnlyIPs []string
-	rules          []string
+	httpPort           int
+	httpsPort          int
+	dnsPort            int
+	enableDNS          bool
+	blockQuic          bool
+	blockedIPs         []string
+	inspectOnlyIPs     []string
+	additionalTLSPorts []int
+	egressInterface    string
+	rules              []string
 }
 
 func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
 	return &FirewallManager{
-		httpPort:       httpPort,
-		httpsPort:      httpsPort,
-		dnsPort:        0,
-		enableDNS:      false,
-		blockQuic:      false,
-		blockedIPs:     make([]string, 0),
-		inspectOnlyIPs: make([]string, 0),
-		rules:          make([]string, 0),
+		httpPort:           httpPort,
+		httpsPort:          httpsPort,
+		dnsPort:            0,
+		enableDNS:          false,
+		blockQuic:          false,
+		blockedIPs:         make([]string, 0),
+		inspectOnlyIPs:     make([]string, 0),
+		additionalTLSPorts: make([]int, 0),
+		egressInterface:    "",
+		rules:              make([]string, 0),
 	}
 }
 
 // EnableInspectOnly restricts interception to the specified source IPs.
 func (fm *FirewallManager) EnableInspectOnly(ips []string) {
 	fm.inspectOnlyIPs = append(fm.inspectOnlyIPs, ips...)
+}
+
+// EnableAdditionalTLSPorts enables interception for extra TLS destination ports
+// that should be redirected to the local HTTPS proxy listener.
+func (fm *FirewallManager) EnableAdditionalTLSPorts(ports []int) {
+	fm.additionalTLSPorts = append(fm.additionalTLSPorts, ports...)
 }
 
 // EnableIPBlocking configures the firewall to drop traffic to specific IPs/CIDRs.
@@ -66,6 +84,14 @@ func (fm *FirewallManager) Setup() error {
 
 	if err := fm.enableIPForwarding(); err != nil {
 		return fmt.Errorf("failed to enable IP forwarding: %v", err)
+	}
+
+	if fm.egressInterface == "" {
+		iface, err := detectDefaultEgressInterface()
+		if err != nil {
+			return fmt.Errorf("failed to detect default egress interface: %v", err)
+		}
+		fm.egressInterface = iface
 	}
 
 	// Create custom chain SSLPROXY to manage our rules cleanly
@@ -104,6 +130,18 @@ func (fm *FirewallManager) Setup() error {
 		return fmt.Errorf("failed to add HTTPS redirect rule: %v", err)
 	}
 	fm.rules = append(fm.rules, strings.Join(rule, " "))
+
+	for _, port := range fm.additionalTLSPorts {
+		rule = []string{
+			"-t", "nat", "-A", "SSLPROXY",
+			"-p", "tcp", "--dport", strconv.Itoa(port),
+			"-j", "REDIRECT", "--to-ports", fmt.Sprintf("%d", fm.httpsPort),
+		}
+		if err := fm.runIPTables(rule...); err != nil {
+			return fmt.Errorf("failed to add TLS redirect rule for port %d: %v", port, err)
+		}
+		fm.rules = append(fm.rules, strings.Join(rule, " "))
+	}
 
 	if fm.enableDNS {
 		// Rule: Redirect UDP/53 -> Local DNS Proxy Port
@@ -227,9 +265,20 @@ func (fm *FirewallManager) Setup() error {
 		fm.rules = append(fm.rules, strings.Join(rule, " "))
 	}
 
+	if err := fm.configureGatewayForwarding(); err != nil {
+		return fmt.Errorf("failed to configure forwarding/NAT pass-through: %v", err)
+	}
+
 	logger.LogInfo("iptables configured.")
 	logger.LogInfo(fmt.Sprintf("Redirecting port 80  -> :%d", fm.httpPort))
 	logger.LogInfo(fmt.Sprintf("Redirecting port 443 -> :%d", fm.httpsPort))
+	if len(fm.additionalTLSPorts) > 0 {
+		ports := make([]string, 0, len(fm.additionalTLSPorts))
+		for _, port := range fm.additionalTLSPorts {
+			ports = append(ports, strconv.Itoa(port))
+		}
+		logger.LogInfo(fmt.Sprintf("Redirecting extra TLS ports [%s] -> :%d", strings.Join(ports, ","), fm.httpsPort))
+	}
 	if fm.enableDNS {
 		logger.LogInfo(fmt.Sprintf("Redirecting DNS (53/udp,tcp) -> :%d", fm.dnsPort))
 	}
@@ -242,6 +291,7 @@ func (fm *FirewallManager) Setup() error {
 	if len(fm.blockedIPs) > 0 {
 		logger.LogInfo(fmt.Sprintf("Blocking %d IPs/CIDRs at network layer", len(fm.blockedIPs)))
 	}
+	logger.LogInfo(fmt.Sprintf("Gateway pass-through enabled on interface %s (FORWARD + MASQUERADE)", fm.egressInterface))
 
 	return nil
 }
@@ -251,8 +301,8 @@ func (fm *FirewallManager) Cleanup() error {
 	logger.LogInfo("Reverting iptables rules...")
 
 	// Remove links from PREROUTING and OUTPUT
-	fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-j", "SSL_DISPATCH")
-	fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSL_DISPATCH")
+	fm.deleteRuleCompletely([]string{"-t", "nat", "-A", "PREROUTING", "-j", "SSL_DISPATCH"})
+	fm.deleteRuleCompletely([]string{"-t", "nat", "-A", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSL_DISPATCH"})
 
 	// Flush and delete SSL_DISPATCH
 	fm.runIPTables("-t", "nat", "-F", "SSL_DISPATCH")
@@ -263,14 +313,40 @@ func (fm *FirewallManager) Cleanup() error {
 	fm.runIPTables("-t", "nat", "-X", "SSLPROXY")
 
 	if fm.blockQuic {
-		fm.runIPTables("-t", "filter", "-D", "FORWARD", "-p", "udp", "--dport", "443", "-j", "DROP")
-		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-p", "udp", "--dport", "443", "-j", "DROP")
+		fm.deleteRuleCompletely([]string{"-t", "filter", "-A", "FORWARD", "-p", "udp", "--dport", "443", "-j", "DROP"})
+		fm.deleteRuleCompletely([]string{"-t", "filter", "-A", "OUTPUT", "-p", "udp", "--dport", "443", "-j", "DROP"})
 	}
 
 	// Cleanup blocking rules
 	for _, ip := range fm.blockedIPs {
-		fm.runIPTables("-t", "filter", "-D", "FORWARD", "-d", ip, "-j", "DROP")
-		fm.runIPTables("-t", "filter", "-D", "OUTPUT", "-d", ip, "-j", "DROP")
+		fm.deleteRuleCompletely([]string{"-t", "filter", "-A", "FORWARD", "-d", ip, "-j", "DROP"})
+		fm.deleteRuleCompletely([]string{"-t", "filter", "-A", "OUTPUT", "-d", ip, "-j", "DROP"})
+	}
+
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED",
+		"-m", "comment", "--comment", forwardEstablishedRuleComment,
+		"-j", "ACCEPT",
+	})
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardAllowRuleComment,
+		"-j", "ACCEPT",
+	})
+
+	if fm.egressInterface == "" {
+		if iface, err := detectDefaultEgressInterface(); err == nil {
+			fm.egressInterface = iface
+		}
+	}
+	if fm.egressInterface != "" {
+		fm.deleteRuleCompletely([]string{
+			"-t", "nat", "-A", "POSTROUTING",
+			"-o", fm.egressInterface,
+			"-m", "comment", "--comment", masqueradeRuleComment,
+			"-j", "MASQUERADE",
+		})
 	}
 
 	logger.LogInfo("iptables rules cleaned up.")
@@ -301,6 +377,26 @@ func (fm *FirewallManager) cleanLegacyRules() {
 			break
 		}
 	}
+	// Cleanup forwarding/NAT pass-through rules from previous runs.
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED",
+		"-m", "comment", "--comment", forwardEstablishedRuleComment,
+		"-j", "ACCEPT",
+	})
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardAllowRuleComment,
+		"-j", "ACCEPT",
+	})
+	if fm.egressInterface != "" {
+		fm.deleteRuleCompletely([]string{
+			"-t", "nat", "-A", "POSTROUTING",
+			"-o", fm.egressInterface,
+			"-m", "comment", "--comment", masqueradeRuleComment,
+			"-j", "MASQUERADE",
+		})
+	}
 }
 
 func (fm *FirewallManager) enableIPForwarding() error {
@@ -327,4 +423,101 @@ func (fm *FirewallManager) GetHTTPPort() int {
 
 func (fm *FirewallManager) GetHTTPSPort() int {
 	return fm.httpsPort
+}
+
+func (fm *FirewallManager) configureGatewayForwarding() error {
+	forwardEstablishedRule := []string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED",
+		"-m", "comment", "--comment", forwardEstablishedRuleComment,
+		"-j", "ACCEPT",
+	}
+	fm.deleteRuleCompletely(forwardEstablishedRule)
+	if err := fm.runIPTables(forwardEstablishedRule...); err != nil {
+		return fmt.Errorf("failed to add FORWARD established/related rule: %v", err)
+	}
+	fm.rules = append(fm.rules, strings.Join(forwardEstablishedRule, " "))
+
+	forwardAllowRule := []string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardAllowRuleComment,
+		"-j", "ACCEPT",
+	}
+	fm.deleteRuleCompletely(forwardAllowRule)
+	if err := fm.runIPTables(forwardAllowRule...); err != nil {
+		return fmt.Errorf("failed to add FORWARD allow rule: %v", err)
+	}
+	fm.rules = append(fm.rules, strings.Join(forwardAllowRule, " "))
+
+	masqueradeRule := []string{
+		"-t", "nat", "-A", "POSTROUTING",
+		"-o", fm.egressInterface,
+		"-m", "comment", "--comment", masqueradeRuleComment,
+		"-j", "MASQUERADE",
+	}
+	fm.deleteRuleCompletely(masqueradeRule)
+	if err := fm.runIPTables(masqueradeRule...); err != nil {
+		return fmt.Errorf("failed to add POSTROUTING masquerade rule on %s: %v", fm.egressInterface, err)
+	}
+	fm.rules = append(fm.rules, strings.Join(masqueradeRule, " "))
+
+	return nil
+}
+
+func (fm *FirewallManager) deleteRuleCompletely(addRule []string) {
+	delRule := make([]string, len(addRule))
+	copy(delRule, addRule)
+	for i, arg := range delRule {
+		if arg == "-A" || arg == "-I" {
+			delRule[i] = "-D"
+			break
+		}
+	}
+	for {
+		if err := fm.runIPTables(delRule...); err != nil {
+			break
+		}
+	}
+}
+
+func detectDefaultEgressInterface() (string, error) {
+	f, err := os.Open("/proc/net/route")
+	if err != nil {
+		return "", fmt.Errorf("open /proc/net/route: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// Skip header.
+	if !scanner.Scan() {
+		return "", fmt.Errorf("empty routing table")
+	}
+
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		// Destination 00000000 represents the default route.
+		if fields[1] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseInt(fields[3], 16, 64)
+		if err != nil {
+			continue
+		}
+		// Route flag 0x1 indicates the route is up.
+		if flags&0x1 == 0 {
+			continue
+		}
+		iface := fields[0]
+		if iface != "" && iface != "lo" {
+			return iface, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read /proc/net/route: %w", err)
+	}
+
+	return "", fmt.Errorf("default route interface not found")
 }

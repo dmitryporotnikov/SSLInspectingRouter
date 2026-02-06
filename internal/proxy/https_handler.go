@@ -23,13 +23,29 @@ import (
 type HTTPSHandler struct {
 	certManager *cert.CertManager
 	client      *http.Client
+	ipClient    *http.Client
 	blockList   *blocklist.BlockList
 	bypassList  *blocklist.BlockList
 	rewriter    *rewrites.Engine
 }
 
+var errNoSNI = errors.New("no SNI found in ClientHello")
+
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
 func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPSHandler {
+	baseTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // Verify upstream certificates by default.
+		},
+	}
+	ipTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			// IP-based transparent targets commonly present hostname certs.
+			// Skip upstream cert verification for IP endpoints to avoid false 502 errors.
+			InsecureSkipVerify: true,
+		},
+	}
+
 	return &HTTPSHandler{
 		certManager: certManager,
 		client: &http.Client{
@@ -37,11 +53,14 @@ func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockLi
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: false, // Verify upstream certificates by default
-				},
+			Transport: baseTransport,
+		},
+		ipClient: &http.Client{
+			// Keep redirect behavior consistent with the main client.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
 			},
+			Transport: ipTransport,
 		},
 		blockList:  blockList,
 		bypassList: bypassList,
@@ -57,13 +76,29 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	sourceIP := sourceIPFromAddr(conn.RemoteAddr())
 	logger.LogDebug(fmt.Sprintf("HTTPS connection from %s", sourceIP))
 
+	upstreamAddr, upstreamPort, err := getOriginalDestination(conn)
+	if err != nil {
+		upstreamAddr = ""
+		upstreamPort = 443
+		logger.LogDebug(fmt.Sprintf("Original destination lookup unavailable, defaulting to :443: %v", err))
+	}
+
 	hostname, peekedBytes, err := h.extractSNI(conn)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
+		if errors.Is(err, errNoSNI) && upstreamAddr != "" {
+			hostname = upstreamAddr
+			logger.LogDebug(fmt.Sprintf("SNI missing; using original destination IP %s", hostname))
+		} else {
+			logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
+			return
+		}
+	}
+	if hostname == "" {
+		logger.LogError("SNI extraction failed: TLS target host is empty")
 		return
 	}
 
-	logger.LogDebug(fmt.Sprintf("SNI hostname: %s", hostname))
+	logger.LogDebug(fmt.Sprintf("TLS target host: %s", hostname))
 
 	if h.blockList != nil && h.blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
@@ -74,7 +109,7 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	if h.bypassList != nil && h.bypassList.Matches(hostname) {
 		reqID := logger.LogBypassedRequest(sourceIP, hostname)
-		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort)
 		return
 	}
 
@@ -106,13 +141,21 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	}
 	defer tlsConn.Close()
 
-	h.handleHTTPSRequest(tlsConn, hostname, sourceIP)
+	h.handleHTTPSRequest(tlsConn, hostname, sourceIP, upstreamPort)
 }
 
-func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64) {
-	upstreamConn, err := net.DialTimeout("tcp", net.JoinHostPort(hostname, "443"), 10*time.Second)
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64, upstreamAddr string, upstreamPort int) {
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	dialHost := hostname
+	if upstreamAddr != "" {
+		dialHost = upstreamAddr
+	}
+	dialTarget := net.JoinHostPort(dialHost, strconv.Itoa(upstreamPort))
+	upstreamConn, err := net.DialTimeout("tcp", dialTarget, 10*time.Second)
 	if err != nil {
-		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s: %v", hostname, err))
+		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s (%s): %v", hostname, dialTarget, err))
 		logger.LogBypassedResponse(reqID, sourceIP, hostname)
 		return
 	}
@@ -153,7 +196,7 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 }
 
 // handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.
-func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP string) {
+func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP string, upstreamPort int) {
 	req, err := http.ReadRequest(bufioReaderFromConn(tlsConn))
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Failed to read HTTPS request: %v", err))
@@ -166,7 +209,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
-	fullURL := fmt.Sprintf("https://%s%s", hostname, req.URL.RequestURI())
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	upstreamAuthority := hostname
+	if upstreamPort != 443 {
+		upstreamAuthority = net.JoinHostPort(hostname, strconv.Itoa(upstreamPort))
+	}
+
+	fullURL := fmt.Sprintf("https://%s%s", upstreamAuthority, req.URL.RequestURI())
 
 	reqID := logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
 
@@ -178,14 +229,23 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	}
 
 	copyHeaders(proxyReq.Header, req.Header)
-	proxyReq.Host = hostname
+	if req.Host != "" {
+		proxyReq.Host = req.Host
+	} else {
+		proxyReq.Host = upstreamAuthority
+	}
 
 	if h.rewriter != nil && h.rewriter.ShouldForceGzip(req, hostname) {
 		// Avoid brotli upstream responses; we only support body tampering for identity/gzip/deflate.
 		proxyReq.Header.Set("Accept-Encoding", "gzip")
 	}
 
-	resp, err := h.client.Do(proxyReq)
+	upstreamClient := h.client
+	if net.ParseIP(hostname) != nil {
+		upstreamClient = h.ipClient
+	}
+
+	resp, err := upstreamClient.Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
@@ -278,7 +338,7 @@ func (h *HTTPSHandler) extractSNI(conn net.Conn) (string, []byte, error) {
 
 	hostname := parseSNI(buf[:n])
 	if hostname == "" {
-		return "", nil, fmt.Errorf("no SNI found in ClientHello")
+		return "", buf[:n], errNoSNI
 	}
 
 	return hostname, buf[:n], nil
