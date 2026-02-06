@@ -54,6 +54,15 @@ func SetConsoleRequestLogging(enabled bool) {
 	consoleLogs.Store(enabled)
 }
 
+// SetVerbose enables or disables standard application logging to stderr.
+func SetVerbose(enabled bool) {
+	if enabled {
+		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(io.Discard)
+	}
+}
+
 // InitLogger sets up SQLite logging for HTTP and HTTPS traffic in the software directory.
 func InitLogger() error {
 	var err error

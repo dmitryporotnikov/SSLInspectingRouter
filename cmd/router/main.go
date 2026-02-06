@@ -40,10 +40,12 @@ func main() {
 	wipeDB := flag.Bool("wipedb", false, "delete the traffic database before startup")
 	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
 	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
+	verboseFlag := flag.Bool("verbose", false, "enable verbose application logging")
 	flag.Parse()
 
 	logger.SetConsoleRequestLogging(*webFlag == "")
 	logger.SetLogTruncation(*truncateLog)
+	logger.SetVerbose(*verboseFlag)
 	if *wipeDB {
 		if err := logger.WipeLogDB(); err != nil {
 			logger.LogError(fmt.Sprintf("Failed to wipe log database: %v", err))
