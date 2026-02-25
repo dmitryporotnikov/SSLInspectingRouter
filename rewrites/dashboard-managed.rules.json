@@ -1,0 +1,22 @@
+{
+  "rules": [
+    {
+      "name": "test",
+      "enabled": true,
+      "match": {
+        "content_type_regex": "text/(plain|html)"
+      },
+      "actions": {
+        "set_headers": {
+          "X-Rewrite-Hit": "test"
+        },
+        "replace_body_regex": [
+          {
+            "pattern": "(?i)google",
+            "replace": "Dmitry"
+          }
+        ]
+      }
+    }
+  ]
+}

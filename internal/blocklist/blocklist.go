@@ -2,6 +2,7 @@ package blocklist
 
 import (
 	"net"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,25 @@ func (b *BlockList) Count() int {
 		return 0
 	}
 	return len(b.domains) + len(b.ips) + len(b.cidrs)
+}
+
+func (b *BlockList) Entries() []string {
+	if b == nil {
+		return []string{}
+	}
+
+	out := make([]string, 0, len(b.domains)+len(b.ips)+len(b.cidrs))
+	for domain := range b.domains {
+		out = append(out, domain)
+	}
+	for ip := range b.ips {
+		out = append(out, ip)
+	}
+	for _, cidr := range b.cidrs {
+		out = append(out, cidr.String())
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (b *BlockList) Matches(name string) bool {

@@ -86,12 +86,33 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are
 | `sudo ./sslinspectingrouter -ports 8443,9443` | Inspect additional TLS destination ports (comma-separated). Useful for non-standard HTTPS services. |
 | `sudo ./sslinspectingrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
 | `sudo ./sslinspectingrouter -web <port>` | Start the Web Dashboard on the specified port (e.g., `:3000`). |
-| `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database before startup. |
+| `sudo ./sslinspectingrouter -web :3000 -webtls` | Serve the Web Dashboard over HTTPS with an auto-generated self-signed certificate. |
+| `sudo ./sslinspectingrouter -webcert <path> -webkey <path>` | Custom TLS cert/key paths for dashboard HTTPS mode (`-webtls`). |
+| `sudo ./sslinspectingrouter -bodyartifacts` | Store binary/compressed HTTP body previews as files for offline inspection. |
+| `sudo ./sslinspectingrouter -bodyartifactsdir <path>` | Custom directory for stored body artifacts (default: `logs/body-artifacts`). |
+| `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database and remove stored body artifacts before startup. |
 | `sudo ./sslinspectingrouter -drop <list>` | Drop requests for specific FQDNs, IPs, CIDR (comma-separated). Subdomains are also blocked. |
 | `sudo ./sslinspectingrouter -bypass <list>` | Bypass inspection for specific FQDNs (HTTP Host + HTTPS SNI), IPs or CIDRs. Subdomains are also bypassed. Bypassed entries are still logged, but `request` / `response` in SQLite are stored as `BYPASSED`: |
 | `sudo ./sslinspectingrouter -inspectonly <IP1,IP2>` | **Allowlist Mode:** Only intercept traffic from the specified source IPs. All other traffic is ignored and bypasses the inspection entirely. |
 | `sudo ./sslinspectingrouter -pcap <file>` | Export **decrypted** traffic to a PCAP file readable by Wireshark. Uses synthetic TCP streams to represent the HTTP/HTTPS payloads. |
 | `sudo ./sslinspectingrouter -verbose` | Enable verbose application logging to stderr. By default, standard logs are suppressed to keep the console clean. |
+
+### Web Dashboard Authentication
+
+When `-web` is enabled, the dashboard API requires authentication.
+When `-webtls` is also enabled, session cookies are marked secure and the dashboard is served over HTTPS.
+
+Bootstrap admin account (created on first run if no users exist):
+
+* Username: `admin`
+* Password: `admin123`
+
+Optional environment variables for bootstrap/admin configuration:
+
+* `SIR_ADMIN_USER`
+* `SIR_ADMIN_PASS`
+* `SIR_ADMIN_NAME`
+* `SIR_SESSION_SECRET` (recommended in production)
 
 **Example: Blocking specific domains**
 
@@ -116,6 +137,12 @@ sudo ./sslinspectingrouter -drop test.com,test2.com -web :3000 -truncatelog
 sudo ./sslinspectingrouter -ports 8443,9443
 ```
 
+**Example: Dashboard over HTTPS (self-signed)**
+
+```bash
+sudo ./sslinspectingrouter -web :3000 -webtls
+```
+
 ### Shutdown
 
 The application listens for `SIGINT` and `SIGTERM` signals. When received, it initiates a graceful shutdown:
@@ -129,6 +156,8 @@ The application listens for `SIGINT` and `SIGTERM` signals. When received, it in
 Console output displays only the source IP and requested FQDN. Detailed logs are stored in a SQLite database.
 
 * **Log Location:** `logs/traffic.db`
+* When inspection is paused from Web UI, tunneled TLS traffic is still routed and logged as `INSPECTION PAUSED` (not `BYPASSED`).
+* Binary/compressed payload previews are marked as skipped with detected `Content-Type` / `Content-Encoding` metadata. Optional body artifacts can be enabled via CLI or Web UI for admin inspection.
 
 ## Response Tampering (Rewrites)
 
@@ -136,6 +165,67 @@ The router can modify **HTTP and HTTPS responses on the fly** using rewrite rule
 
 * **Examples & format:** `rewrites/README.md`
 * **Reloading:** rules are auto-reloaded when files change (polling).
+
+## API (v1)
+
+The backend exposes a versioned API under `/api/v1`.
+
+Public endpoints:
+
+* `GET /api/v1/health`
+* `POST /api/v1/auth/login`
+
+Authenticated endpoints:
+
+* `POST /api/v1/auth/logout`
+* `GET /api/v1/auth/me`
+* `GET /api/v1/status`
+* `PUT /api/v1/status` (admin)
+* `GET /api/v1/policy`
+* `PUT /api/v1/policy` (admin)
+* `GET /api/v1/traffic`
+* `GET /api/v1/traffic/{id}`
+* `GET /api/v1/rewrites`
+* `POST /api/v1/rewrites` (admin)
+* `GET /api/v1/rewrites/{id}` (admin-managed rule by index)
+* `PUT /api/v1/rewrites/{id}` (admin, managed rules)
+* `DELETE /api/v1/rewrites/{id}` (admin, managed rules)
+* `GET /api/v1/users` (admin)
+* `POST /api/v1/users` (admin)
+* `PUT /api/v1/users/{id}` (admin)
+* `DELETE /api/v1/users/{id}` (admin)
+
+`PUT /api/v1/status` accepts runtime admin settings:
+
+* `inspection_enabled` (bool)
+* `truncate_log_enabled` (bool)
+* `body_artifacts_enabled` (bool)
+* `body_artifacts_directory` (string, optional; can also be changed from the dashboard Body Artifacts path control)
+
+`GET /api/v1/status` also returns startup flag visibility fields for the dashboard settings panel:
+
+* `allow_quic` (bool)
+* `additional_tls_ports` ([]int)
+* `inspect_only_sources` ([]string)
+* `pcap_path` (string)
+
+`PUT /api/v1/policy` accepts runtime admin policy lists:
+
+* `drop_list` ([]string)
+* `bypass_list` ([]string)
+
+`/api/v1/rewrites` powers the dashboard Rewrite Policy Studio:
+
+* Existing rewrite files are visible in UI; external files are read-only.
+* UI-created/edited rules are stored in `rewrites/dashboard-managed.rules.json`.
+* Changes are saved atomically and trigger immediate engine reload.
+
+Legacy aliases are still available for old clients:
+
+* `/api/status`
+* `/api/policy`
+* `/api/traffic`
+* `/api/rewrites`
 
 ### Database Schema
 
@@ -150,4 +240,3 @@ The database contains two primary tables: `Requests` and `Responses`.
 | `content` | The body content. Stores full body by default; max 4KB if `-truncatelog` is used. |
 
 > **Note:** Binary responses may appear as blobs in the `content` column.
-

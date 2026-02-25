@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSL Inspecting Router Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body class="login-mode">
+    <div class="background-layer" aria-hidden="true"></div>
+
+    <section id="login-view" class="auth-view">
+        <div class="auth-panel panel">
+            <p class="eyebrow">Operations</p>
+            <h1>SSL Inspecting Router</h1>
+            <p class="muted">Sign in to access traffic analytics, inspection controls, and user administration.</p>
+            <form id="login-form" class="auth-form">
+                <label>
+                    Username
+                    <input type="text" id="login-username" autocomplete="username" required>
+                </label>
+                <label>
+                    Password
+                    <input type="password" id="login-password" autocomplete="current-password" required>
+                </label>
+                <button type="submit" class="btn btn-primary">Sign In</button>
+                <p id="login-error" class="form-error hidden"></p>
+            </form>
+            <p class="auth-footnote">Default bootstrap credentials: <code>admin / admin123</code></p>
+        </div>
+    </section>
+
+    <div id="app-view" class="app-view hidden">
+        <aside class="sidebar panel">
+            <div>
+                <p class="eyebrow">SSLInspectingRouter</p>
+                <h2>Operations Console</h2>
+            </div>
+
+            <nav class="nav-list">
+                <button type="button" data-section="traffic" class="nav-item active">Traffic</button>
+                <button type="button" data-section="rewrites" class="nav-item">Rewrites</button>
+                <button type="button" data-section="users" class="nav-item" id="users-nav">Users</button>
+            </nav>
+
+            <div class="sidebar-meta">
+                <div class="meta-row">
+                    <span>Rules Loaded</span>
+                    <strong id="rewrite-count">0</strong>
+                </div>
+                <div class="meta-row" id="body-artifacts-meta">
+                    <span>Body Artifacts</span>
+                    <strong id="body-artifacts-dir" class="meta-value">disabled</strong>
+                </div>
+                <div class="meta-row">
+                    <span>Drop Entries</span>
+                    <strong id="drop-list-count">0</strong>
+                </div>
+                <div class="meta-row">
+                    <span>Bypass Entries</span>
+                    <strong id="bypass-list-count">0</strong>
+                </div>
+                <button type="button" class="btn btn-ghost" id="view-rules-btn">Open Rewrite Studio</button>
+            </div>
+
+            <section id="settings-panel" class="settings-panel hidden">
+                <div class="settings-header">
+                    <h3>Control Center</h3>
+                    <p>Live routing controls and policy management.</p>
+                </div>
+
+                <div class="settings-group compact-group">
+                    <h4>Runtime</h4>
+                    <div class="control-list">
+                        <div class="switch-wrap compact-switch" id="inspection-control-wrap">
+                            <span>Inspection</span>
+                            <label class="switch">
+                                <input type="checkbox" id="inspection-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="truncate-log-wrap">
+                            <span>Truncate Log Bodies</span>
+                            <label class="switch">
+                                <input type="checkbox" id="truncate-log-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
+                            <span>Body Artifacts</span>
+                            <label class="switch">
+                                <input type="checkbox" id="body-artifacts-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="settings-fold" open>
+                    <summary>Artifact Storage Path</summary>
+                    <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
+                        <input type="text" id="body-artifacts-directory-input" placeholder="Artifact directory">
+                        <button type="button" class="btn btn-ghost" id="body-artifacts-save">Set Path</button>
+                    </div>
+                </details>
+
+                <details id="policy-controls" class="settings-fold policy-panel">
+                    <summary>Traffic Policy</summary>
+                    <p class="muted policy-hint">One per line or comma-separated. Supports domains, IPs, and CIDRs.</p>
+                    <div class="policy-grid">
+                        <label>
+                            Drop List
+                            <textarea id="drop-list-input" placeholder="example.com&#10;203.0.113.10&#10;10.10.0.0/16"></textarea>
+                        </label>
+                        <label>
+                            Bypass List
+                            <textarea id="bypass-list-input" placeholder="internal.example.com&#10;198.51.100.42"></textarea>
+                        </label>
+                    </div>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-primary" id="policy-save-btn">Save Policy</button>
+                        <span class="muted" id="policy-save-status"></span>
+                    </div>
+                </details>
+
+                <details class="settings-fold">
+                    <summary>Startup Profile</summary>
+                    <p class="muted settings-note">Visibility only. Changes require restart.</p>
+                    <div class="meta-row">
+                        <span>Allow QUIC</span>
+                        <strong id="allow-quic-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span>TLS Ports</span>
+                        <strong id="tls-ports-value" class="meta-value">default</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span>Inspect-Only</span>
+                        <strong id="inspect-only-value" class="meta-value">all sources</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span>PCAP Path</span>
+                        <strong id="pcap-path-value" class="meta-value">disabled</strong>
+                    </div>
+                </details>
+            </section>
+        </aside>
+
+        <main class="main-area">
+            <header class="topbar panel">
+                <div class="status-grid">
+                    <article>
+                        <p class="metric-label">Connection</p>
+                        <p class="metric-value" id="metric-connection">Connected</p>
+                    </article>
+                    <article>
+                        <p class="metric-label">Database Size</p>
+                        <p class="metric-value" id="metric-db-size">-</p>
+                    </article>
+                    <article>
+                        <p class="metric-label">Captured Requests</p>
+                        <p class="metric-value" id="metric-requests">-</p>
+                    </article>
+                </div>
+
+                <div class="topbar-actions">
+                    <div class="user-block">
+                        <span id="current-user">-</span>
+                        <small id="current-role">-</small>
+                    </div>
+                    <button type="button" class="btn btn-ghost theme-toggle" id="theme-toggle" title="Switch theme" aria-label="Switch theme">
+                        <span id="theme-toggle-icon" aria-hidden="true">☾</span>
+                    </button>
+                    <button type="button" class="btn btn-ghost" id="logout-btn">Logout</button>
+                </div>
+            </header>
+
+            <section id="traffic-section" class="panel section-view">
+                <div class="section-header">
+                    <h3>Traffic Monitor</h3>
+                    <div class="section-actions">
+                        <input type="text" id="traffic-search" placeholder="Search host, source IP, status...">
+                        <select id="traffic-mode-filter">
+                            <option value="">All Modes</option>
+                            <option value="inspected">Inspected</option>
+                            <option value="paused">Inspection Paused</option>
+                            <option value="bypassed">Bypassed</option>
+                            <option value="blocked">Blocked</option>
+                        </select>
+                        <select id="traffic-limit">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                        </select>
+                        <button type="button" class="btn btn-ghost" id="refresh-btn">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="traffic-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Mode</th>
+                                <th>Method</th>
+                                <th>Host</th>
+                                <th>URL</th>
+                                <th>Source</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="traffic-table-body"></tbody>
+                    </table>
+                </div>
+
+                <div class="pager-row">
+                    <div id="traffic-summary" class="muted">0 results</div>
+                    <div class="pager-controls">
+                        <button type="button" class="btn btn-ghost" id="prev-page">Previous</button>
+                        <button type="button" class="btn btn-ghost" id="next-page">Next</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="rewrites-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3>Rewrite Policy Studio</h3>
+                    <div class="section-actions">
+                        <button type="button" class="btn btn-ghost" id="rewrite-new-btn">New Rule</button>
+                        <button type="button" class="btn btn-ghost" id="rewrite-reload-btn">Reload</button>
+                    </div>
+                </div>
+
+                <div class="rewrites-layout">
+                    <div class="rewrite-list-wrap">
+                        <div class="rewrite-list-header">
+                            <span>Loaded Rules</span>
+                            <small id="rewrite-managed-file" class="muted">managed file: -</small>
+                        </div>
+                        <div id="rewrite-list" class="rewrite-list"></div>
+                    </div>
+
+                    <form id="rewrite-form" class="rewrite-form">
+                        <div class="rewrite-form-head">
+                            <div>
+                                <h4 id="rewrite-form-title">New Rewrite Rule</h4>
+                                <p id="rewrite-form-origin" class="muted">Managed rule</p>
+                            </div>
+                            <label class="checkbox-row rewrite-enabled-row">
+                                <input type="checkbox" id="rewrite-enabled" checked>
+                                Enabled
+                            </label>
+                        </div>
+
+                        <div class="rewrite-grid">
+                            <label>
+                                Rule Name
+                                <input type="text" id="rewrite-name" placeholder="inject-debug-header" required>
+                            </label>
+                            <label>
+                                Match Host
+                                <input type="text" id="rewrite-host" placeholder="example.com">
+                            </label>
+                            <label>
+                                Match Host Regex
+                                <input type="text" id="rewrite-host-regex" placeholder="(^|\\.)example\\.com$">
+                            </label>
+                            <label>
+                                Path Prefix
+                                <input type="text" id="rewrite-path-prefix" placeholder="/api/v1/">
+                            </label>
+                            <label>
+                                Path Regex
+                                <input type="text" id="rewrite-path-regex" placeholder="^/v[0-9]+/">
+                            </label>
+                            <label>
+                                Method
+                                <input type="text" id="rewrite-method" placeholder="GET">
+                            </label>
+                            <label>
+                                Methods (comma/newline)
+                                <input type="text" id="rewrite-methods" placeholder="GET,POST">
+                            </label>
+                            <label>
+                                Status
+                                <input type="text" id="rewrite-status" placeholder="200">
+                            </label>
+                            <label>
+                                Statuses (comma/newline)
+                                <input type="text" id="rewrite-statuses" placeholder="200,204,206">
+                            </label>
+                            <label>
+                                Content-Type Contains
+                                <input type="text" id="rewrite-content-type-contains" placeholder="text/html">
+                            </label>
+                            <label>
+                                Content-Type Regex
+                                <input type="text" id="rewrite-content-type-regex" placeholder="text/(html|plain)">
+                            </label>
+                            <label>
+                                Delete Headers (comma/newline)
+                                <input type="text" id="rewrite-del-headers" placeholder="Server, X-Powered-By">
+                            </label>
+                        </div>
+
+                        <div class="rewrite-grid rewrite-text-grid">
+                            <label>
+                                Request Header Contains
+                                <textarea id="rewrite-req-headers" placeholder="Header-Name: value"></textarea>
+                            </label>
+                            <label>
+                                Response Header Contains
+                                <textarea id="rewrite-resp-headers" placeholder="Header-Name: value"></textarea>
+                            </label>
+                            <label>
+                                Set Headers
+                                <textarea id="rewrite-set-headers" placeholder="Header-Name: value"></textarea>
+                            </label>
+                            <label>
+                                Add Headers
+                                <textarea id="rewrite-add-headers" placeholder="Header-Name: value"></textarea>
+                            </label>
+                            <label>
+                                Body Replace
+                                <textarea id="rewrite-body-replace" placeholder="from => to"></textarea>
+                            </label>
+                            <label>
+                                Body Regex Replace
+                                <textarea id="rewrite-body-regex" placeholder="pattern => replacement"></textarea>
+                            </label>
+                        </div>
+
+                        <div class="rewrite-actions">
+                            <button type="submit" class="btn btn-primary" id="rewrite-save-btn">Save Rule</button>
+                            <button type="button" class="btn btn-ghost" id="rewrite-delete-btn">Delete Rule</button>
+                            <button type="button" class="btn btn-ghost hidden" id="rewrite-clone-btn">Clone to Managed</button>
+                            <span class="muted" id="rewrite-save-status"></span>
+                        </div>
+
+                        <p id="rewrite-form-error" class="form-error hidden"></p>
+                    </form>
+                </div>
+            </section>
+
+            <section id="users-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3>User Management</h3>
+                    <button type="button" class="btn btn-ghost" id="reload-users-btn">Reload</button>
+                </div>
+
+                <div class="table-wrap users-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Display Name</th>
+                                <th>Role</th>
+                                <th>State</th>
+                                <th>Last Login</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body"></tbody>
+                    </table>
+                </div>
+
+                <form id="user-form" class="user-form">
+                    <h4 id="user-form-title">Create User</h4>
+                    <input type="hidden" id="user-id">
+                    <div class="user-grid">
+                        <label>
+                            Username
+                            <input id="user-username" type="text" placeholder="analyst-1" required>
+                        </label>
+                        <label>
+                            Display Name
+                            <input id="user-display-name" type="text" placeholder="Operations Analyst" required>
+                        </label>
+                        <label>
+                            Role
+                            <select id="user-role">
+                                <option value="viewer">Viewer</option>
+                                <option value="operator">Operator</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </label>
+                        <label>
+                            Password
+                            <input id="user-password" type="password" placeholder="Minimum 8 characters" required>
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="user-active" type="checkbox" checked>
+                            Active
+                        </label>
+                    </div>
+                    <div class="user-form-actions">
+                        <button type="submit" class="btn btn-primary" id="user-submit">Create User</button>
+                        <button type="button" class="btn btn-ghost hidden" id="cancel-edit">Cancel Edit</button>
+                    </div>
+                    <p id="user-form-error" class="form-error hidden"></p>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal" class="modal hidden">
+        <div class="modal-card panel">
+            <div class="modal-header">
+                <h4 id="modal-title">Details</h4>
+                <button type="button" class="btn btn-ghost" id="modal-close">Close</button>
+            </div>
+            <div id="modal-content" class="modal-content"></div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+
+</html>

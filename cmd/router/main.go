@@ -37,8 +37,13 @@ func main() {
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
 	portsFlag := flag.String("ports", "", "comma-separated additional TLS destination ports to inspect (e.g. 8443,9443)")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
-	wipeDB := flag.Bool("wipedb", false, "delete the traffic database before startup")
+	wipeDB := flag.Bool("wipedb", false, "delete the traffic database and stored body artifacts before startup")
 	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
+	webTLSFlag := flag.Bool("webtls", false, "serve web dashboard over HTTPS using a self-signed certificate")
+	webCertFlag := flag.String("webcert", "", "path to dashboard TLS certificate PEM (auto-generated if missing when -webtls is enabled)")
+	webKeyFlag := flag.String("webkey", "", "path to dashboard TLS private key PEM (auto-generated if missing when -webtls is enabled)")
+	bodyArtifactsFlag := flag.Bool("bodyartifacts", false, "store binary/compressed HTTP body previews to disk for offline inspection")
+	bodyArtifactsDirFlag := flag.String("bodyartifactsdir", "", "directory for stored body artifacts (default: logs/body-artifacts)")
 	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
 	verboseFlag := flag.Bool("verbose", false, "enable verbose application logging")
 	flag.Parse()
@@ -49,6 +54,10 @@ func main() {
 	if *wipeDB {
 		if err := logger.WipeLogDB(); err != nil {
 			logger.LogError(fmt.Sprintf("Failed to wipe log database: %v", err))
+			os.Exit(1)
+		}
+		if err := logger.WipeBodyArtifacts(*bodyArtifactsDirFlag); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to wipe body artifacts: %v", err))
 			os.Exit(1)
 		}
 	}
@@ -78,6 +87,11 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.CloseLogger()
+
+	if err := logger.SetBinaryBodyArtifactStorage(*bodyArtifactsFlag, *bodyArtifactsDirFlag); err != nil {
+		logger.LogError(fmt.Sprintf("Failed to configure body artifact storage: %v", err))
+		os.Exit(1)
+	}
 
 	if *pcapFlag != "" {
 		if err := pcap.Init(*pcapFlag); err != nil {
@@ -156,7 +170,23 @@ func main() {
 
 	if *webFlag != "" {
 		go func() {
-			if err := dashboard.Start(logger.DB, *webFlag, httpsHandler, rewriter); err != nil {
+			options := dashboard.Options{
+				TLS: dashboard.TLSOptions{
+					Enabled:  *webTLSFlag,
+					CertFile: *webCertFlag,
+					KeyFile:  *webKeyFlag,
+				},
+				HTTPHandler: httpHandler,
+				DNSProxy:    dnsProxy,
+				Runtime: dashboard.RuntimeOptions{
+					AllowQUIC:          *allowQUIC,
+					AdditionalTLSPorts: additionalTLSPorts,
+					InspectOnlySources: inspectOnlyList,
+					PCAPPath:           *pcapFlag,
+					TruncateLog:        *truncateLog,
+				},
+			}
+			if err := dashboard.StartWithOptions(logger.DB, *webFlag, httpsHandler, rewriter, options); err != nil {
 				logger.LogError(fmt.Sprintf("Dashboard server failed: %v", err))
 			}
 		}()
@@ -173,6 +203,9 @@ func main() {
 	}
 	if bypassList != nil {
 		logger.LogInfo(fmt.Sprintf("Bypass list enabled (%d entries)", bypassList.Count()))
+	}
+	if artifactsEnabled, artifactsDir := logger.BinaryBodyArtifactStorage(); artifactsEnabled {
+		logger.LogInfo(fmt.Sprintf("Binary/compressed body artifacts enabled: %s", artifactsDir))
 	}
 	logger.LogInfo("CA Path: ca-cert.pem")
 	logger.LogInfo("Logs: SQLite traffic.db in Logs directory")

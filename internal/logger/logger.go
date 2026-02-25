@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	_ "modernc.org/sqlite"
@@ -22,22 +24,63 @@ var (
 	consoleMutex sync.Mutex
 	consoleLogs  atomic.Bool
 	DB           *sql.DB
+
+	bodyArtifactMu      sync.RWMutex
+	bodyArtifactEnabled bool
+	bodyArtifactDir     string
 )
 
 const (
-	logDBFile           = "traffic.db"
-	MaxContentBytes     = 4096
-	consoleRequestsOnly = true
+	logDBFile             = "traffic.db"
+	MaxContentBytes       = 4096
+	consoleRequestsOnly   = true
+	bodyArtifactSubfolder = "body-artifacts"
 )
 
-var truncateLogs bool
+var truncateLogs atomic.Bool
+
+type bodyPreviewAnalysis struct {
+	ShowAsText      bool
+	Reason          string
+	ContentType     string
+	ContentEncoding string
+}
 
 func SetLogTruncation(enabled bool) {
-	truncateLogs = enabled
+	truncateLogs.Store(enabled)
+}
+
+func IsLogTruncationEnabled() bool {
+	return truncateLogs.Load()
+}
+
+func SetBinaryBodyArtifactStorage(enabled bool, dir string) error {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		dir = resolveBodyArtifactDir()
+	}
+
+	if enabled {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create body artifact directory: %w", err)
+		}
+	}
+
+	bodyArtifactMu.Lock()
+	bodyArtifactEnabled = enabled
+	bodyArtifactDir = dir
+	bodyArtifactMu.Unlock()
+	return nil
+}
+
+func BinaryBodyArtifactStorage() (enabled bool, dir string) {
+	bodyArtifactMu.RLock()
+	defer bodyArtifactMu.RUnlock()
+	return bodyArtifactEnabled, bodyArtifactDir
 }
 
 func LogBodyLimit() int {
-	if truncateLogs {
+	if truncateLogs.Load() {
 		return MaxContentBytes
 	}
 	return -1
@@ -45,9 +88,18 @@ func LogBodyLimit() int {
 
 func init() {
 	consoleLogs.Store(true)
+	bodyArtifactDir = resolveBodyArtifactDir()
 	if consoleRequestsOnly {
 		log.SetOutput(io.Discard)
 	}
+}
+
+func resolveBodyArtifactDir() string {
+	dir := filepath.Join("logs", bodyArtifactSubfolder)
+	if exePath, err := os.Executable(); err == nil {
+		dir = filepath.Join(filepath.Dir(exePath), "logs", bodyArtifactSubfolder)
+	}
+	return dir
 }
 
 func SetConsoleRequestLogging(enabled bool) {
@@ -126,6 +178,27 @@ func WipeLogDB() error {
 	dbPath := resolveDBPath()
 	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func WipeBodyArtifacts(customDir string) error {
+	dirs := []string{resolveBodyArtifactDir()}
+	customDir = strings.TrimSpace(customDir)
+	if customDir != "" {
+		customDir = filepath.Clean(customDir)
+		if customDir != dirs[0] {
+			dirs = append(dirs, customDir)
+		}
+	}
+
+	for _, dir := range dirs {
+		if dir == "" || dir == "." || dir == string(filepath.Separator) {
+			return fmt.Errorf("refusing to wipe unsafe artifact path: %q", dir)
+		}
+		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
@@ -222,7 +295,9 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 
 // LogHTTPResponse writes HTTP response details to SQLite.
 func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
-	content := formatContentWithLimit(headers, bodyPreview, truncated)
+	analysis := analyzeBodyPreview(headers, bodyPreview)
+	artifactPath := maybeStoreBodyArtifact("http_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
+	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
 	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
@@ -240,7 +315,9 @@ func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.He
 
 // LogHTTPSResponse writes HTTPS response details to SQLite.
 func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
-	content := formatContentWithLimit(headers, bodyPreview, truncated)
+	analysis := analyzeBodyPreview(headers, bodyPreview)
+	artifactPath := maybeStoreBodyArtifact("https_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
+	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
 	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
@@ -288,6 +365,18 @@ func LogBypassedResponse(reqID int64, sourceIP, fqdn string) {
 	insertResponse(reqID, sourceIP, fqdn, "BYPASSED", "")
 }
 
+// LogInspectionPausedRequest records a tunnelled TLS request while active inspection is paused.
+func LogInspectionPausedRequest(sourceIP, fqdn string) int64 {
+	LogConsoleRequest(sourceIP, fqdn)
+	id, _ := insertRequest(sourceIP, fqdn, "INSPECTION PAUSED", "")
+	return id
+}
+
+// LogInspectionPausedResponse records a tunnelled TLS response while active inspection is paused.
+func LogInspectionPausedResponse(reqID int64, sourceIP, fqdn string) {
+	insertResponse(reqID, sourceIP, fqdn, "INSPECTION PAUSED", "")
+}
+
 func insertRequest(sourceIP, fqdn, requestLine, content string) (int64, error) {
 	if DB == nil {
 		return 0, nil
@@ -319,10 +408,16 @@ func insertResponse(id int64, sourceIP, fqdn, responseLine, content string) {
 
 func formatContent(headers http.Header, body []byte) string {
 	preview, truncated := truncateBytes(body, MaxContentBytes)
-	return formatContentWithLimit(headers, preview, truncated)
+	analysis := analyzeBodyPreview(headers, preview)
+	return formatContentWithAnalysis(headers, preview, truncated, analysis, "")
 }
 
 func formatContentWithLimit(headers http.Header, body []byte, truncated bool) string {
+	analysis := analyzeBodyPreview(headers, body)
+	return formatContentWithAnalysis(headers, body, truncated, analysis, "")
+}
+
+func formatContentWithAnalysis(headers http.Header, body []byte, truncated bool, analysis bodyPreviewAnalysis, artifactPath string) string {
 	var logEntry strings.Builder
 	if len(headers) > 0 {
 		logEntry.WriteString("Headers:\n")
@@ -334,7 +429,23 @@ func formatContentWithLimit(headers http.Header, body []byte, truncated bool) st
 	}
 
 	if len(body) > 0 {
-		logEntry.WriteString(fmt.Sprintf("Body Preview (%d bytes):\n%s\n", len(body), string(body)))
+		if analysis.ShowAsText {
+			logEntry.WriteString(fmt.Sprintf("Body Preview (%d bytes):\n%s\n", len(body), string(body)))
+		} else {
+			logEntry.WriteString(fmt.Sprintf("Body Preview skipped (%d bytes)\n", len(body)))
+			if analysis.Reason != "" {
+				logEntry.WriteString(fmt.Sprintf("Reason: %s\n", analysis.Reason))
+			}
+			if analysis.ContentType != "" {
+				logEntry.WriteString(fmt.Sprintf("Detected Content-Type: %s\n", analysis.ContentType))
+			}
+			if analysis.ContentEncoding != "" {
+				logEntry.WriteString(fmt.Sprintf("Detected Content-Encoding: %s\n", analysis.ContentEncoding))
+			}
+			if artifactPath != "" {
+				logEntry.WriteString(fmt.Sprintf("Body Artifact: %s\n", artifactPath))
+			}
+		}
 		if truncated {
 			logEntry.WriteString("... (truncated)\n")
 		}
@@ -343,8 +454,227 @@ func formatContentWithLimit(headers http.Header, body []byte, truncated bool) st
 	return logEntry.String()
 }
 
+func analyzeBodyPreview(headers http.Header, body []byte) bodyPreviewAnalysis {
+	analysis := bodyPreviewAnalysis{
+		ShowAsText:      true,
+		ContentType:     normalizedContentType(headers.Get("Content-Type")),
+		ContentEncoding: normalizedContentEncoding(headers.Get("Content-Encoding")),
+	}
+
+	if len(body) == 0 {
+		return analysis
+	}
+
+	if analysis.ContentEncoding != "" && analysis.ContentEncoding != "identity" {
+		analysis.ShowAsText = false
+		analysis.Reason = "compressed response body"
+		return analysis
+	}
+
+	if analysis.ContentType != "" && !isLikelyTextContentType(analysis.ContentType) {
+		analysis.ShowAsText = false
+		analysis.Reason = "binary content type"
+		return analysis
+	}
+
+	if !isLikelyTextBytes(body) {
+		analysis.ShowAsText = false
+		analysis.Reason = "body bytes are not valid text"
+	}
+	return analysis
+}
+
+func normalizedContentType(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	mediaType, _, err := mime.ParseMediaType(raw)
+	if err == nil {
+		return strings.ToLower(strings.TrimSpace(mediaType))
+	}
+	if idx := strings.Index(raw, ";"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func normalizedContentEncoding(raw string) string {
+	for _, part := range strings.Split(strings.ToLower(raw), ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return part
+		}
+	}
+	return ""
+}
+
+func isLikelyTextContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	if contentType == "" {
+		return false
+	}
+	if strings.HasPrefix(contentType, "text/") {
+		return true
+	}
+	if strings.HasSuffix(contentType, "+json") || strings.HasSuffix(contentType, "+xml") || strings.HasSuffix(contentType, "+yaml") {
+		return true
+	}
+
+	switch contentType {
+	case "application/json",
+		"application/xml",
+		"application/x-www-form-urlencoded",
+		"application/javascript",
+		"application/x-javascript",
+		"application/ecmascript",
+		"application/graphql",
+		"application/yaml",
+		"application/x-yaml",
+		"application/problem+json",
+		"image/svg+xml":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyTextBytes(body []byte) bool {
+	if len(body) == 0 {
+		return true
+	}
+	sample := body
+	if len(sample) > MaxContentBytes {
+		sample = sample[:MaxContentBytes]
+	}
+
+	if !utf8.Valid(sample) {
+		return false
+	}
+
+	var controls int
+	for _, r := range string(sample) {
+		if r == 0 {
+			return false
+		}
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+			controls++
+		}
+	}
+
+	return controls*100 <= len(sample)*5
+}
+
+func maybeStoreBodyArtifact(direction string, reqID int64, sourceIP, fqdn string, analysis bodyPreviewAnalysis, body []byte, truncated bool) string {
+	if len(body) == 0 || analysis.ShowAsText {
+		return ""
+	}
+
+	enabled, dir := BinaryBodyArtifactStorage()
+	if !enabled || strings.TrimSpace(dir) == "" {
+		return ""
+	}
+
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		LogError(fmt.Sprintf("Body artifact directory unavailable: %v", err))
+		return ""
+	}
+
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	fileName := fmt.Sprintf("%s_req%d_%s_%s_%s%s",
+		stamp,
+		reqID,
+		sanitizeFilenameToken(direction),
+		sanitizeFilenameToken(fqdn),
+		sanitizeFilenameToken(sourceIP),
+		bodyArtifactExt(analysis.ContentType, analysis.ContentEncoding),
+	)
+	path := filepath.Join(dir, fileName)
+
+	if err := os.WriteFile(path, body, 0640); err != nil {
+		LogError(fmt.Sprintf("Failed writing body artifact %s: %v", path, err))
+		return ""
+	}
+
+	if truncated {
+		metaPath := path + ".meta.txt"
+		_ = os.WriteFile(metaPath, []byte("This artifact contains a truncated body preview due to active log truncation limits.\n"), 0640)
+	}
+
+	return path
+}
+
+func sanitizeFilenameToken(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return "unknown"
+	}
+
+	var b strings.Builder
+	b.Grow(len(value))
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.' || r == '_' || r == '-':
+			b.WriteRune(r)
+		case r == ':':
+			b.WriteRune('-')
+		default:
+			b.WriteRune('_')
+		}
+	}
+
+	out := strings.Trim(b.String(), "._-")
+	if out == "" {
+		return "unknown"
+	}
+	if len(out) > 80 {
+		return out[:80]
+	}
+	return out
+}
+
+func bodyArtifactExt(contentType, contentEncoding string) string {
+	switch contentEncoding {
+	case "gzip":
+		return ".gz"
+	case "br":
+		return ".br"
+	case "deflate":
+		return ".deflate"
+	}
+
+	switch contentType {
+	case "application/json":
+		return ".json"
+	case "text/html":
+		return ".html"
+	case "text/plain":
+		return ".txt"
+	case "application/xml", "text/xml", "image/svg+xml":
+		return ".xml"
+	case "application/javascript", "application/x-javascript", "application/ecmascript":
+		return ".js"
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "application/pdf":
+		return ".pdf"
+	case "application/zip":
+		return ".zip"
+	default:
+		return ".bin"
+	}
+}
+
 func truncateBytes(body []byte, max int) ([]byte, bool) {
-	if !truncateLogs {
+	if !truncateLogs.Load() {
 		return body, false
 	}
 	if len(body) <= max {

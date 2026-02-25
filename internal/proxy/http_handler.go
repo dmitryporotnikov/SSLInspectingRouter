@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
@@ -20,6 +21,7 @@ type HTTPHandler struct {
 	blockList  *blocklist.BlockList
 	bypassList *blocklist.BlockList
 	rewriter   *rewrites.Engine
+	policyMu   sync.RWMutex
 }
 
 // NewHTTPHandler creates a new HTTP proxy handler.
@@ -37,9 +39,53 @@ func NewHTTPHandler(blockList *blocklist.BlockList, bypassList *blocklist.BlockL
 	}
 }
 
+func (h *HTTPHandler) SetBlockList(blockList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.blockList = blockList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPHandler) SetBypassList(bypassList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.bypassList = bypassList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPHandler) BlockListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.blockList == nil {
+		return []string{}
+	}
+	return h.blockList.Entries()
+}
+
+func (h *HTTPHandler) BypassListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.bypassList == nil {
+		return []string{}
+	}
+	return h.bypassList.Entries()
+}
+
+func (h *HTTPHandler) currentBlockList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.blockList
+}
+
+func (h *HTTPHandler) currentBypassList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.bypassList
+}
+
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceIP := getSourceIP(r)
 	targetHost := requestHost(r)
+	blockList := h.currentBlockList()
+	bypassList := h.currentBypassList()
 
 	logger.LogDebug(fmt.Sprintf("HTTP request from %s: %s %s", sourceIP, r.Method, r.URL.String()))
 
@@ -49,7 +95,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
 
-	if h.blockList != nil && h.blockList.Matches(targetHost) {
+	if blockList != nil && blockList.Matches(targetHost) {
 		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
 		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s", targetHost, sourceIP))
 		http.Error(w, "Blocked", http.StatusForbidden)
@@ -57,7 +103,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bypassed := h.bypassList != nil && h.bypassList.Matches(targetHost)
+	bypassed := bypassList != nil && bypassList.Matches(targetHost)
 	var reqID int64
 	if bypassed {
 		reqID = logger.LogBypassedRequest(sourceIP, targetHost)

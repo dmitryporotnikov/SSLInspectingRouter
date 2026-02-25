@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,9 +30,17 @@ type HTTPSHandler struct {
 	bypassList        *blocklist.BlockList
 	rewriter          *rewrites.Engine
 	inspectionEnabled atomic.Bool
+	policyMu          sync.RWMutex
 }
 
 var errNoSNI = errors.New("no SNI found in ClientHello")
+
+type tunnelLogMode int
+
+const (
+	tunnelLogBypassed tunnelLogMode = iota
+	tunnelLogInspectionPaused
+)
 
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
 func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPSHandler {
@@ -82,6 +91,48 @@ func (h *HTTPSHandler) IsInspectionEnabled() bool {
 	return h.inspectionEnabled.Load()
 }
 
+func (h *HTTPSHandler) SetBlockList(blockList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.blockList = blockList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPSHandler) SetBypassList(bypassList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.bypassList = bypassList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPSHandler) BlockListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.blockList == nil {
+		return []string{}
+	}
+	return h.blockList.Entries()
+}
+
+func (h *HTTPSHandler) BypassListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.bypassList == nil {
+		return []string{}
+	}
+	return h.bypassList.Entries()
+}
+
+func (h *HTTPSHandler) currentBlockList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.blockList
+}
+
+func (h *HTTPSHandler) currentBypassList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.bypassList
+}
+
 // HandleConnection intercepts a raw TCP connection, performs SNI sniffing,
 // and upgrades it to a MITM TLS connection for inspection.
 func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
@@ -116,21 +167,24 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	if !h.IsInspectionEnabled() {
 		logger.LogInfo(fmt.Sprintf("Inspection disabled: tunneling %s from %s", hostname, sourceIP))
-		reqID := logger.LogTLSRequest(sourceIP, hostname, "INSPECTION DISABLED")
-		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort)
+		reqID := logger.LogInspectionPausedRequest(sourceIP, hostname)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogInspectionPaused)
 		return
 	}
 
-	if h.blockList != nil && h.blockList.Matches(hostname) {
+	blockList := h.currentBlockList()
+	bypassList := h.currentBypassList()
+
+	if blockList != nil && blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
 		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
 		logger.LogHTTPSResponse(reqID, sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
 		return
 	}
 
-	if h.bypassList != nil && h.bypassList.Matches(hostname) {
+	if bypassList != nil && bypassList.Matches(hostname) {
 		reqID := logger.LogBypassedRequest(sourceIP, hostname)
-		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogBypassed)
 		return
 	}
 
@@ -165,7 +219,7 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	h.handleHTTPSRequest(tlsConn, hostname, sourceIP, upstreamPort)
 }
 
-func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64, upstreamAddr string, upstreamPort int) {
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64, upstreamAddr string, upstreamPort int, logMode tunnelLogMode) {
 	if upstreamPort <= 0 {
 		upstreamPort = 443
 	}
@@ -177,14 +231,14 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 	upstreamConn, err := net.DialTimeout("tcp", dialTarget, 10*time.Second)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s (%s): %v", hostname, dialTarget, err))
-		logger.LogBypassedResponse(reqID, sourceIP, hostname)
+		logTunnelResponse(reqID, sourceIP, hostname, logMode)
 		return
 	}
 	defer upstreamConn.Close()
 
 	if _, err := io.Copy(upstreamConn, bytes.NewReader(peekedBytes)); err != nil {
 		logger.LogError(fmt.Sprintf("Bypass upstream write failed for %s: %v", hostname, err))
-		logger.LogBypassedResponse(reqID, sourceIP, hostname)
+		logTunnelResponse(reqID, sourceIP, hostname, logMode)
 		return
 	}
 
@@ -212,8 +266,20 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 		}
 	}
 
-	logger.LogBypassedResponse(reqID, sourceIP, hostname)
+	logTunnelResponse(reqID, sourceIP, hostname, logMode)
+	if logMode == tunnelLogInspectionPaused {
+		logger.LogDebug(fmt.Sprintf("HTTPS tunnelled (inspection paused): %s", hostname))
+		return
+	}
 	logger.LogDebug(fmt.Sprintf("HTTPS bypassed: %s", hostname))
+}
+
+func logTunnelResponse(reqID int64, sourceIP, hostname string, logMode tunnelLogMode) {
+	if logMode == tunnelLogInspectionPaused {
+		logger.LogInspectionPausedResponse(reqID, sourceIP, hostname)
+		return
+	}
+	logger.LogBypassedResponse(reqID, sourceIP, hostname)
 }
 
 // handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.

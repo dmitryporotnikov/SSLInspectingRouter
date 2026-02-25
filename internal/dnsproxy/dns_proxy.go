@@ -7,7 +7,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -25,6 +27,7 @@ type DNSProxy struct {
 	listenAddr string
 	upstreams  []string
 	blockList  *blocklist.BlockList
+	mu         sync.RWMutex
 }
 
 func NewDNSProxy(listenPort int, blockList *blocklist.BlockList) (*DNSProxy, error) {
@@ -179,10 +182,34 @@ func (p *DNSProxy) analyzeQuery(msg []byte) (bool, string, string) {
 	if err != nil {
 		return false, "", ""
 	}
-	if p.blockList == nil {
+	list := p.currentBlockList()
+	if list == nil {
 		return false, name, qtype
 	}
-	return p.blockList.Matches(name), name, qtype
+	return list.Matches(name), name, qtype
+}
+
+func (p *DNSProxy) SetBlockList(list *blocklist.BlockList) {
+	p.mu.Lock()
+	p.blockList = list
+	p.mu.Unlock()
+}
+
+func (p *DNSProxy) BlockListEntries() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.blockList == nil {
+		return []string{}
+	}
+	entries := p.blockList.Entries()
+	sort.Strings(entries)
+	return entries
+}
+
+func (p *DNSProxy) currentBlockList() *blocklist.BlockList {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.blockList
 }
 
 func (p *DNSProxy) forwardUDP(payload []byte) ([]byte, error) {

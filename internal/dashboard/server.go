@@ -1,222 +1,342 @@
 package dashboard
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
-
+	"os"
+	"path"
 	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
 
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/dnsproxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
 
-//go:embed static/*
-var staticFiles embed.FS
+//go:embed frontend/*
+var frontendFiles embed.FS
 
+type contextKey string
+
+const (
+	contextUserKey      contextKey = "dashboard_user"
+	contextTokenHashKey contextKey = "dashboard_token_hash"
+)
+
+const (
+	defaultSessionCookie = "sir_session"
+	defaultSessionTTL    = 24 * time.Hour
+)
+
+// Server exposes API endpoints and serves the frontend dashboard.
 type Server struct {
-	db           *sql.DB
-	addr         string
-	httpsHandler *proxy.HTTPSHandler
-	rewriter     *rewrites.Engine
+	db                 *sql.DB
+	addr               string
+	httpHandler        *proxy.HTTPHandler
+	httpsHandler       *proxy.HTTPSHandler
+	dnsProxy           *dnsproxy.DNSProxy
+	rewriter           *rewrites.Engine
+	allowQUIC          bool
+	additionalTLSPorts []int
+	inspectOnlySources []string
+	pcapPath           string
+	truncateLog        atomic.Bool
+	sessionTTL         time.Duration
+	sessionCookieName  string
+	sessionSecret      []byte
+	now                func() time.Time
+	lastRequestCount   atomic.Int64
+	lastActiveSession  atomic.Int64
+}
+
+type TLSOptions struct {
+	Enabled  bool
+	CertFile string
+	KeyFile  string
+}
+
+type Options struct {
+	TLS         TLSOptions
+	HTTPHandler *proxy.HTTPHandler
+	DNSProxy    *dnsproxy.DNSProxy
+	Runtime     RuntimeOptions
+}
+
+type RuntimeOptions struct {
+	AllowQUIC          bool
+	AdditionalTLSPorts []int
+	InspectOnlySources []string
+	PCAPPath           string
+	TruncateLog        bool
 }
 
 func Start(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler, rewriter *rewrites.Engine) error {
-	s := &Server{
-		db:           db,
-		addr:         addr,
-		httpsHandler: httpsHandler,
-		rewriter:     rewriter,
+	return StartWithOptions(db, addr, httpsHandler, rewriter, Options{})
+}
+
+func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler, rewriter *rewrites.Engine, options Options) error {
+	s, err := NewServer(db, addr, httpsHandler, rewriter)
+	if err != nil {
+		return err
+	}
+	s.httpHandler = options.HTTPHandler
+	s.dnsProxy = options.DNSProxy
+	s.allowQUIC = options.Runtime.AllowQUIC
+	s.pcapPath = strings.TrimSpace(options.Runtime.PCAPPath)
+	s.additionalTLSPorts = append([]int(nil), options.Runtime.AdditionalTLSPorts...)
+	s.inspectOnlySources = append([]string(nil), options.Runtime.InspectOnlySources...)
+	s.truncateLog.Store(options.Runtime.TruncateLog)
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           s.routes(),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	mux := http.NewServeMux()
-
-	// Serve static files
-	fsys, _ := fs.Sub(staticFiles, "static")
-	mux.Handle("/", http.FileServer(http.FS(fsys)))
-
-	// API endpoints
-	mux.HandleFunc("/api/traffic", s.handleTraffic)
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/rewrites", s.handleRewrites)
+	if options.TLS.Enabled {
+		certFile, keyFile, err := ensureDashboardTLSCert(options.TLS.CertFile, options.TLS.KeyFile)
+		if err != nil {
+			return err
+		}
+		logger.LogInfo(fmt.Sprintf("Dashboard listening on https://localhost%s", addr))
+		return server.ListenAndServeTLS(certFile, keyFile)
+	}
 
 	logger.LogInfo(fmt.Sprintf("Dashboard listening on http://localhost%s", addr))
-	return http.ListenAndServe(addr, mux)
+	return server.ListenAndServe()
 }
 
-type TrafficEntry struct {
-	ID        int64  `json:"id"`
-	Timestamp string `json:"timestamp"`
-	SourceIP  string `json:"source_ip"`
-	Host      string `json:"host"`
-	Method    string `json:"method"`
-	URL       string `json:"url"`
-	Status    string `json:"status"` // From response
-}
-
-type TrafficDetail struct {
-	TrafficEntry
-	RequestFull  string `json:"request_full"`
-	RequestBody  string `json:"request_body"`
-	ResponseFull string `json:"response_full"`
-	ResponseBody string `json:"response_body"`
-}
-
-func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
-	// Check for ID parameter to return details
-	idParam := r.URL.Query().Get("id")
-	if idParam != "" {
-		s.handleTrafficDetail(w, idParam)
-		return
+func NewServer(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler, rewriter *rewrites.Engine) (*Server, error) {
+	if db == nil {
+		return nil, errors.New("dashboard requires initialized database")
 	}
 
-	// Simple query: Get latest N requests
-	limitStr := r.URL.Query().Get("limit")
-	limit := 50
-	if limitStr != "" {
-		if val, err := strconv.Atoi(limitStr); err == nil && val > 0 {
-			limit = val
+	secret := []byte(strings.TrimSpace(os.Getenv("SIR_SESSION_SECRET")))
+	if len(secret) == 0 {
+		generated, err := randomSecret(32)
+		if err != nil {
+			return nil, fmt.Errorf("generate session secret: %w", err)
 		}
+		secret = generated
 	}
 
-	rows, err := s.db.Query(fmt.Sprintf(`
-		SELECT 
-			r.id, r.timestamp, r.source_ip, r.fqdn, r.request,
-			COALESCE(res.response, '') as response_line
-		FROM Requests r
-		LEFT JOIN Responses res ON r.id = res.id
-		ORDER BY r.id DESC LIMIT %d
-	`, limit))
+	s := &Server{
+		db:                db,
+		addr:              addr,
+		httpsHandler:      httpsHandler,
+		rewriter:          rewriter,
+		sessionTTL:        defaultSessionTTL,
+		sessionCookieName: defaultSessionCookie,
+		sessionSecret:     secret,
+		now:               time.Now,
+	}
+	s.truncateLog.Store(logger.IsLogTruncationEnabled())
+
+	if err := s.ensureAuthSchema(); err != nil {
+		return nil, err
+	}
+	if err := s.ensureBootstrapAdmin(); err != nil {
+		return nil, err
+	}
+
+	return s, nil
+}
+
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/api/v1/health", s.handleHealth)
+	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
+	mux.Handle("/api/v1/auth/logout", s.withAuth(http.HandlerFunc(s.handleAuthLogout)))
+	mux.Handle("/api/v1/auth/me", s.withAuth(http.HandlerFunc(s.handleAuthMe)))
+
+	mux.Handle("/api/v1/status", s.withAuth(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("/api/v1/policy", s.withAuth(http.HandlerFunc(s.handlePolicy)))
+	mux.Handle("/api/v1/traffic", s.withAuth(http.HandlerFunc(s.handleTraffic)))
+	mux.Handle("/api/v1/traffic/", s.withAuth(http.HandlerFunc(s.handleTrafficDetail)))
+	mux.Handle("/api/v1/rewrites", s.withAuth(http.HandlerFunc(s.handleRewrites)))
+	mux.Handle("/api/v1/rewrites/", s.withAuth(http.HandlerFunc(s.handleRewriteByID)))
+	mux.Handle("/api/v1/users", s.withAdmin(http.HandlerFunc(s.handleUsers)))
+	mux.Handle("/api/v1/users/", s.withAdmin(http.HandlerFunc(s.handleUserByID)))
+
+	// Compatibility aliases for old clients.
+	mux.Handle("/api/status", s.withAuth(http.HandlerFunc(s.handleStatus)))
+	mux.Handle("/api/policy", s.withAuth(http.HandlerFunc(s.handlePolicy)))
+	mux.Handle("/api/rewrites", s.withAuth(http.HandlerFunc(s.handleRewrites)))
+	mux.Handle("/api/rewrites/", s.withAuth(http.HandlerFunc(s.handleRewriteByID)))
+	mux.Handle("/api/traffic", s.withAuth(http.HandlerFunc(s.handleLegacyTraffic)))
+
+	mux.Handle("/", s.frontendHandler())
+
+	return s.recoverMiddleware(mux)
+}
+
+func (s *Server) frontendHandler() http.Handler {
+	fsys, err := fs.Sub(frontendFiles, "frontend")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var entries []TrafficEntry
-	for rows.Next() {
-		var e TrafficEntry
-		var reqLine []byte
-		var resLine []byte
-
-		// Scan raw bytes to handle potential NULLs or blobs gracefully
-		if err := rows.Scan(&e.ID, &e.Timestamp, &e.SourceIP, &e.Host, &reqLine, &resLine); err != nil {
-			continue
-		}
-
-		// Helper to extract first line
-		firstLine := func(b []byte) string {
-			for i, c := range b {
-				if c == '\n' || c == '\r' {
-					return string(b[:i])
-				}
-			}
-			return string(b)
-		}
-
-		// Basic parsing of request line "METHOD URL ..."
-		req := firstLine(reqLine)
-		var method, url string
-		fmt.Sscanf(req, "%s %s", &method, &url)
-		e.Method = method
-		e.URL = url
-
-		// Basic parsing of response line "Protocol Status ..."
-		e.Status = firstLine(resLine)
-
-		entries = append(entries, e)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
-}
-
-func (s *Server) handleTrafficDetail(w http.ResponseWriter, id string) {
-	// Fetch full details
-	var d TrafficDetail
-	var reqBlob, resBlob, reqBodyBlob, resBodyBlob []byte
-
-	// Query Requests table
-	err := s.db.QueryRow(`
-		SELECT id, timestamp, source_ip, fqdn, request, content
-		FROM Requests WHERE id = ?
-	`, id).Scan(&d.ID, &d.Timestamp, &d.SourceIP, &d.Host, &reqBlob, &reqBodyBlob)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			http.Error(w, "Not found", http.StatusNotFound)
-		} else {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		return
+		})
 	}
 
-	d.RequestFull = string(reqBlob)
-	d.RequestBody = string(reqBodyBlob)
-
-	// Query Responses table (optional, might not exist yet)
-	err = s.db.QueryRow(`
-		SELECT response, content
-		FROM Responses WHERE id = ?
-	`, id).Scan(&resBlob, &resBodyBlob)
-
-	if err == nil {
-		d.ResponseFull = string(resBlob)
-		d.ResponseBody = string(resBodyBlob)
+	indexHTML, err := fs.ReadFile(fsys, "index.html")
+	if err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		})
 	}
 
-	// Parse method/status for the summary part of Detail (optional, but good for consistency)
-	// (Skipping deep parsing here as frontend can use raw full text or we can reuse logic)
+	staticServer := http.FileServer(http.FS(fsys))
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(d)
-}
-
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		var payload struct {
-			InspectionEnabled bool `json:"inspection_enabled"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
 			return
 		}
-		if s.httpsHandler != nil {
-			s.httpsHandler.SetInspection(payload.InspectionEnabled)
+
+		cleaned := path.Clean(r.URL.Path)
+		if cleaned == "." || cleaned == "/" {
+			serveIndexHTML(w, r, indexHTML)
+			return
 		}
-	}
 
-	size, _ := logger.GetTrafficDBSize()
-	inspectionEnabled := true
-	if s.httpsHandler != nil {
-		inspectionEnabled = s.httpsHandler.IsInspectionEnabled()
-	}
+		base := path.Base(cleaned)
+		if !strings.Contains(base, ".") {
+			serveIndexHTML(w, r, indexHTML)
+			return
+		}
 
-	resp := struct {
-		DBSizeBytes       int64 `json:"db_size_bytes"`
-		InspectionEnabled bool  `json:"inspection_enabled"`
-	}{
-		DBSizeBytes:       size,
-		InspectionEnabled: inspectionEnabled,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+		staticServer.ServeHTTP(w, r)
+	})
 }
 
-func (s *Server) handleRewrites(w http.ResponseWriter, r *http.Request) {
-	var rules []rewrites.Rule
-	if s.rewriter != nil {
-		rules = s.rewriter.ListRules()
+func serveIndexHTML(w http.ResponseWriter, r *http.Request, indexHTML []byte) {
+	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(indexHTML))
+}
+
+func (s *Server) recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				logger.LogError(fmt.Sprintf("Dashboard panic on %s %s: %v", r.Method, r.URL.Path, recovered))
+				writeJSONError(w, http.StatusInternalServerError, "internal server error")
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeMethodNotAllowed(w, http.MethodGet)
+		return
 	}
-	// Return empty list if nil, for easier JSON parsing
-	if rules == nil {
-		rules = []rewrites.Rule{}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":          true,
+		"server_time": s.now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func (s *Server) handleLegacyTraffic(w http.ResponseWriter, r *http.Request) {
+	if id := strings.TrimSpace(r.URL.Query().Get("id")); id != "" {
+		clone := r.Clone(r.Context())
+		clone.URL.Path = "/api/v1/traffic/" + id
+		s.handleTrafficDetail(w, clone)
+		return
 	}
+	s.handleTraffic(w, r)
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rules)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeJSONError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]any{
+		"error": message,
+	})
+}
+
+func writeMethodNotAllowed(w http.ResponseWriter, allowed ...string) {
+	if len(allowed) > 0 {
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
+	}
+	writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+}
+
+func decodeJSONBody(r *http.Request, dst any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return errors.New("body must contain a single JSON object")
+		}
+		return err
+	}
+	return nil
+}
+
+func parseBoundedInt(raw string, fallback, min, max int) int {
+	value := fallback
+	if raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			value = parsed
+		}
+	}
+	if value < min {
+		value = min
+	}
+	if value > max {
+		value = max
+	}
+	return value
+}
+
+func parsePathID(pathValue, prefix string) (int64, error) {
+	idToken := strings.TrimPrefix(pathValue, prefix)
+	if idToken == pathValue || idToken == "" || strings.Contains(idToken, "/") {
+		return 0, errors.New("invalid resource id")
+	}
+
+	id, err := strconv.ParseInt(idToken, 10, 64)
+	if err != nil || id < 1 {
+		return 0, errors.New("invalid resource id")
+	}
+	return id, nil
+}
+
+func userFromContext(ctx context.Context) *DashboardUser {
+	if ctx == nil {
+		return nil
+	}
+	user, _ := ctx.Value(contextUserKey).(*DashboardUser)
+	return user
+}
+
+func tokenHashFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(contextTokenHashKey).(string)
+	return value
 }
