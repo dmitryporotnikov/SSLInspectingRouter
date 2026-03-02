@@ -32,6 +32,8 @@ This repository contains a transparent interception proxy written in Go for HTTP
                                       Export PCAP File
 ```
 
+Optional egress mode: `SSLInspectingRouter -> WireGuard tunnel -> Internet`.
+
 The application operates by manipulating `iptables` in both `nat` and `filter` tables.
 It creates custom chains (`SSLPROXY`, `SSL_DISPATCH`) linked to `PREROUTING` and optional `OUTPUT` hooks to manage transparent redirection:
 
@@ -61,7 +63,14 @@ For encrypted traffic, the proxy acts as a Certificate Authority (CA). It dynami
 
 ## Build and Initialization
 
-A setup script is provided to automate environment configuration. It enables IPv4 forwarding using `sysctl` and checks for the Go compiler and netfilter userspace tools.
+A setup script is provided to automate environment configuration. It enables IPv4 forwarding using `sysctl` and checks for required userspace tools.
+
+Common dependencies on Debian/Ubuntu:
+
+* `iptables`
+* `iproute2` (provides `ip`)
+* `wireguard-tools` (provides `wg-quick`; needed for WireGuard egress mode)
+* Go compiler (`golang`)
 
 To build the project:
 
@@ -94,7 +103,7 @@ The project root also contains a `wireguard/` directory for WireGuard client con
 | `sudo ./sslinspectingrouter -allowquic` | Allow QUIC (UDP/443) traffic. By default, QUIC is blocked to enforce HTTPS over TCP. |
 | `sudo ./sslinspectingrouter -ports 8443,9443` | Inspect additional TLS destination ports (comma-separated). Useful for non-standard HTTPS services. |
 | `sudo ./sslinspectingrouter -truncatelog` | Truncate request/response bodies in the logs to a 4KB preview (default is full body). |
-| `sudo ./sslinspectingrouter -web <port>` | Start the Web Dashboard on the specified port (e.g., `:3000`). |
+| `sudo ./sslinspectingrouter -web <addr>` | Start the Web Dashboard on the specified listen address (e.g., `:3000`, `127.0.0.1:3000`). |
 | `sudo ./sslinspectingrouter -web :3000 -webtls` | Serve the Web Dashboard over HTTPS with an auto-generated self-signed certificate. |
 | `sudo ./sslinspectingrouter -webcert <path> -webkey <path>` | Custom TLS cert/key paths for dashboard HTTPS mode (`-webtls`). |
 | `sudo ./sslinspectingrouter -bodyartifacts` | Store binary/compressed HTTP body previews as files for offline inspection. |
@@ -123,21 +132,37 @@ Optional environment variables for bootstrap/admin configuration:
 * `SIR_ADMIN_NAME`
 * `SIR_SESSION_SECRET` (recommended in production)
 
+Optional environment variables for path overrides:
+
+* `SSLINSPECTINGROUTER_REWRITES_DIR`
+* `SSLINSPECTINGROUTER_WIREGUARD_DIR`
+
 **Example: Blocking specific domains**
 
 ```bash
 sudo ./sslinspectingrouter -drop test.com,test2.com
-
 ```
 
 *(This will block `test.com`, `www.test.com`, `test2.com`, etc.)*
 
 **Example: Combining multiple parameters**
 
-You can combine multiple flags. For example, to block specific domains, start the web dashboard on port 3000, and truncate logs:
+You can combine multiple flags. For example, to block specific domains, start the web dashboard on `:3000`, and truncate logs:
 
 ```bash
 sudo ./sslinspectingrouter -drop test.com,test2.com -web :3000 -truncatelog
+```
+
+**Example: Inspect non-standard TLS ports**
+
+```bash
+sudo ./sslinspectingrouter -ports 8443,9443
+```
+
+**Example: Dashboard over HTTPS (self-signed)**
+
+```bash
+sudo ./sslinspectingrouter -web :3000 -webtls
 ```
 
 ### WireGuard Egress (Web UI Runtime Toggle)
@@ -159,24 +184,17 @@ sudo ./sslinspectingrouter -web :3000
 When enabled, the router switches egress NAT to the WireGuard interface so forwarded client traffic and router-originated upstream traffic exit through the tunnel.
 Disable the toggle to revert to the original default egress interface.
 
-**Example: Inspect non-standard TLS ports**
+Notes:
 
-```bash
-sudo ./sslinspectingrouter -ports 8443,9443
-```
-
-**Example: Dashboard over HTTPS (self-signed)**
-
-```bash
-sudo ./sslinspectingrouter -web :3000 -webtls
-```
+* The Web UI config save writes to `wireguard/wg0.conf`.
+* WireGuard egress control requires `wg-quick` and `ip` binaries available on the host.
 
 ### Shutdown
 
 The application listens for `SIGINT` and `SIGTERM` signals. When received, it initiates a graceful shutdown:
 
-1. Flushes the `SSLPROXY` chain from iptables.
-2. Removes redirection rules to prevent network blackholing.
+1. Attempts to bring down an active WireGuard tunnel (if enabled).
+2. Removes `SSL_DISPATCH` / `SSLPROXY` redirection links and chains from iptables.
 3. Removes forwarding/NAT pass-through rules created for gateway mode.
 
 ## Logging
@@ -233,12 +251,19 @@ Authenticated endpoints:
 * `wireguard_enabled` (bool)
 * `wireguard_config` (string; WireGuard client config content)
 
-`GET /api/v1/status` also returns startup flag visibility fields for the dashboard settings panel:
+`GET /api/v1/status` returns runtime status for the dashboard, including:
 
 * `allow_quic` (bool)
 * `additional_tls_ports` ([]int)
 * `inspect_only_sources` ([]string)
 * `pcap_path` (string)
+* `inspection_enabled` (bool)
+* `truncate_log_enabled` (bool)
+* `body_artifacts_enabled` (bool)
+* `body_artifacts_directory` (string)
+* `db_size_bytes` (int64)
+* `request_count` (int64)
+* `active_sessions` (int64)
 * `wireguard_enabled` (bool)
 * `wireguard_interface` (string)
 * `wireguard_config_present` (bool)
@@ -276,4 +301,4 @@ The database contains two primary tables: `Requests` and `Responses`.
 | `request` / `response` | The raw header data (specific to the table). |
 | `content` | The body content. Stores full body by default; max 4KB if `-truncatelog` is used. |
 
-> **Note:** Binary responses may appear as blobs in the `content` column.
+> **Note:** Unrecognized binary responses may appear as blobs in the `content` column.
