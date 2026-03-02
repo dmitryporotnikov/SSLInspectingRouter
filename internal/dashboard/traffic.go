@@ -33,8 +33,13 @@ type TrafficDetail struct {
 }
 
 func (s *Server) handleTraffic(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		s.handleTrafficFlush(w, r)
+		return
+	}
+
 	if r.Method != http.MethodGet {
-		writeMethodNotAllowed(w, http.MethodGet)
+		writeMethodNotAllowed(w, http.MethodGet, http.MethodDelete)
 		return
 	}
 
@@ -202,6 +207,25 @@ func (s *Server) handleTrafficDetail(w http.ResponseWriter, r *http.Request) {
 	detail.Method, detail.URL = parseRequestLine(requestLine)
 
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleTrafficFlush(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil || user.Role != "admin" {
+		writeJSONError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+
+	if err := logger.WipeTrafficTables(s.db); err != nil {
+		logger.LogError(fmt.Sprintf("dashboard traffic flush failed: %v", err))
+		writeJSONError(w, http.StatusInternalServerError, "failed to flush traffic")
+		return
+	}
+
+	s.lastRequestCount.Store(0)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true,
+	})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

@@ -90,7 +90,7 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are
 | `sudo ./sslinspectingrouter -webcert <path> -webkey <path>` | Custom TLS cert/key paths for dashboard HTTPS mode (`-webtls`). |
 | `sudo ./sslinspectingrouter -bodyartifacts` | Store binary/compressed HTTP body previews as files for offline inspection. |
 | `sudo ./sslinspectingrouter -bodyartifactsdir <path>` | Custom directory for stored body artifacts (default: `logs/body-artifacts`). |
-| `sudo ./sslinspectingrouter -wipedb` | Clear the traffic database and remove stored body artifacts before startup. |
+| `sudo ./sslinspectingrouter -wipedb` | Clear only traffic tables (`Requests` / `Responses`) and remove stored body artifacts before startup. Dashboard ACL/auth tables are preserved. |
 | `sudo ./sslinspectingrouter -drop <list>` | Drop requests for specific FQDNs, IPs, CIDR (comma-separated). Subdomains are also blocked. |
 | `sudo ./sslinspectingrouter -bypass <list>` | Bypass inspection for specific FQDNs (HTTP Host + HTTPS SNI), IPs or CIDRs. Subdomains are also bypassed. Bypassed entries are still logged, but `request` / `response` in SQLite are stored as `BYPASSED`: |
 | `sudo ./sslinspectingrouter -inspectonly <IP1,IP2>` | **Allowlist Mode:** Only intercept traffic from the specified source IPs. All other traffic is ignored and bypasses the inspection entirely. |
@@ -184,6 +184,7 @@ Authenticated endpoints:
 * `GET /api/v1/policy`
 * `PUT /api/v1/policy` (admin)
 * `GET /api/v1/traffic`
+* `DELETE /api/v1/traffic` (admin, flush captured traffic)
 * `GET /api/v1/traffic/{id}`
 * `GET /api/v1/rewrites`
 * `POST /api/v1/rewrites` (admin)

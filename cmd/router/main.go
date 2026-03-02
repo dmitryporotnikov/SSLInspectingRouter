@@ -37,7 +37,7 @@ func main() {
 	allowQUIC := flag.Bool("allowquic", false, "allow QUIC (UDP/443); QUIC is blocked by default")
 	portsFlag := flag.String("ports", "", "comma-separated additional TLS destination ports to inspect (e.g. 8443,9443)")
 	truncateLog := flag.Bool("truncatelog", false, "store truncated request/response bodies in logs")
-	wipeDB := flag.Bool("wipedb", false, "delete the traffic database and stored body artifacts before startup")
+	wipeDB := flag.Bool("wipedb", false, "wipe traffic tables and stored body artifacts before startup (preserves dashboard ACL tables)")
 	webFlag := flag.String("web", "", "address to serve web dashboard (e.g. :3000)")
 	webTLSFlag := flag.Bool("webtls", false, "serve web dashboard over HTTPS using a self-signed certificate")
 	webCertFlag := flag.String("webcert", "", "path to dashboard TLS certificate PEM (auto-generated if missing when -webtls is enabled)")
@@ -52,8 +52,8 @@ func main() {
 	logger.SetLogTruncation(*truncateLog)
 	logger.SetVerbose(*verboseFlag)
 	if *wipeDB {
-		if err := logger.WipeLogDB(); err != nil {
-			logger.LogError(fmt.Sprintf("Failed to wipe log database: %v", err))
+		if err := logger.WipeTrafficDB(); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to wipe traffic tables: %v", err))
 			os.Exit(1)
 		}
 		if err := logger.WipeBodyArtifacts(*bodyArtifactsDirFlag); err != nil {

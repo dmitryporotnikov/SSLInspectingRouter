@@ -122,6 +122,7 @@ const dom = {
     trafficModeFilter: document.getElementById("traffic-mode-filter"),
     trafficLimit: document.getElementById("traffic-limit"),
     refreshBtn: document.getElementById("refresh-btn"),
+    flushTrafficBtn: document.getElementById("flush-traffic-btn"),
     prevPageBtn: document.getElementById("prev-page"),
     nextPageBtn: document.getElementById("next-page"),
     trafficSummary: document.getElementById("traffic-summary"),
@@ -355,6 +356,8 @@ function applyUserContext() {
     dom.usersNav.classList.toggle("hidden", !admin);
     dom.settingsPanel.classList.toggle("hidden", !admin);
     dom.bodyArtifactsMeta.classList.toggle("hidden", !admin);
+    dom.flushTrafficBtn.disabled = !admin;
+    dom.flushTrafficBtn.title = admin ? "Delete captured traffic" : "Admin role required";
     if (!admin && state.section === "users") {
         switchSection("traffic");
     }
@@ -441,6 +444,9 @@ function bindEvents() {
 
     dom.refreshBtn.addEventListener("click", () => {
         void refreshDashboard(true);
+    });
+    dom.flushTrafficBtn.addEventListener("click", () => {
+        void handleFlushTraffic();
     });
 
     dom.prevPageBtn.addEventListener("click", () => {
@@ -870,6 +876,29 @@ async function updateTrafficPolicy() {
         alert(error.message);
     } finally {
         dom.policySaveBtn.disabled = false;
+    }
+}
+
+async function handleFlushTraffic() {
+    if (!isAdmin()) {
+        return;
+    }
+    if (!window.confirm("Flush captured traffic from the database and clear the Traffic view?")) {
+        return;
+    }
+
+    const previousLabel = dom.flushTrafficBtn.textContent;
+    dom.flushTrafficBtn.disabled = true;
+    dom.flushTrafficBtn.textContent = "Flushing...";
+    try {
+        await apiRequest("/api/v1/traffic", { method: "DELETE" });
+        state.traffic.offset = 0;
+        await Promise.allSettled([loadTraffic(), loadStatus()]);
+    } catch (error) {
+        alert(error.message);
+    } finally {
+        dom.flushTrafficBtn.textContent = previousLabel;
+        dom.flushTrafficBtn.disabled = false;
     }
 }
 

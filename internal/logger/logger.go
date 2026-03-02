@@ -174,6 +174,102 @@ func resolveDBPath() string {
 	return dbPath
 }
 
+// WipeTrafficDB removes captured traffic rows while preserving non-traffic tables.
+// If the SQLite file does not exist yet, this is a no-op.
+func WipeTrafficDB() error {
+	dbPath := resolveDBPath()
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", dbPath))
+	if err != nil {
+		return fmt.Errorf("failed to open sqlite db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("failed to ping sqlite db: %v", err)
+	}
+
+	return WipeTrafficTables(db)
+}
+
+// WipeTrafficTables removes captured traffic rows from Requests/Responses.
+func WipeTrafficTables(db *sql.DB) error {
+	if db == nil {
+		return fmt.Errorf("database handle is nil")
+	}
+
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	const maxAttempts = 5
+	backoff := 50 * time.Millisecond
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := wipeTrafficTablesOnce(db); err != nil {
+			lastErr = err
+			if isSQLiteBusyError(err) && attempt < maxAttempts {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("failed to wipe traffic tables")
+}
+
+func wipeTrafficTablesOnce(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err := tx.Exec(`DELETE FROM Responses`); err != nil && !isSQLiteNoSuchTableError(err) {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM Requests`); err != nil && !isSQLiteNoSuchTableError(err) {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name IN ('Requests', 'Responses')`); err != nil && !isSQLiteNoSuchTableError(err) {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func isSQLiteNoSuchTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no such table")
+}
+
+func isSQLiteBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database table is locked") ||
+		strings.Contains(message, "database is busy") ||
+		strings.Contains(message, "sql logic error: database is locked")
+}
+
 func WipeLogDB() error {
 	dbPath := resolveDBPath()
 	for _, path := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {

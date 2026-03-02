@@ -34,6 +34,11 @@ var (
 	errAuthInactiveUser   = errors.New("inactive user")
 )
 
+const (
+	authLookupMaxAttempts = 5
+	authLookupBackoff     = 40 * time.Millisecond
+)
+
 // DashboardUser is the authenticated user model exposed via API responses.
 type DashboardUser struct {
 	ID          int64   `json:"id"`
@@ -326,7 +331,14 @@ func (s *Server) authenticateRequest(r *http.Request) (*DashboardUser, string, e
 	tokenHash := s.sessionTokenHash(token)
 	now := s.now().UTC().Format(time.RFC3339Nano)
 
-	row := s.db.QueryRow(`
+	var (
+		user       DashboardUser
+		activeFlag int
+		lastLogin  sql.NullString
+		sessionID  int64
+	)
+
+	query := `
 		SELECT
 			u.id,
 			u.username,
@@ -341,30 +353,40 @@ func (s *Server) authenticateRequest(r *http.Request) (*DashboardUser, string, e
 		JOIN Users u ON u.id = s.user_id
 		WHERE s.token_hash = ? AND s.expires_at > ?
 		LIMIT 1
-	`, tokenHash, now)
+	`
 
-	var (
-		user       DashboardUser
-		activeFlag int
-		lastLogin  sql.NullString
-		sessionID  int64
-	)
-
-	if err := row.Scan(
-		&user.ID,
-		&user.Username,
-		&user.DisplayName,
-		&user.Role,
-		&activeFlag,
-		&user.CreatedAt,
-		&user.UpdatedAt,
-		&lastLogin,
-		&sessionID,
-	); err != nil {
+	backoff := authLookupBackoff
+	var lastErr error
+	for attempt := 1; attempt <= authLookupMaxAttempts; attempt++ {
+		row := s.db.QueryRow(query, tokenHash, now)
+		err := row.Scan(
+			&user.ID,
+			&user.Username,
+			&user.DisplayName,
+			&user.Role,
+			&activeFlag,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+			&lastLogin,
+			&sessionID,
+		)
+		if err == nil {
+			lastErr = nil
+			break
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", errAuthInvalidSession
 		}
+		lastErr = err
+		if isTransientSQLiteBusyError(err) && attempt < authLookupMaxAttempts {
+			time.Sleep(backoff)
+			backoff *= 2
+			continue
+		}
 		return nil, "", fmt.Errorf("lookup session: %w", err)
+	}
+	if lastErr != nil {
+		return nil, "", fmt.Errorf("lookup session: %w", lastErr)
 	}
 
 	user.IsActive = activeFlag == 1
@@ -377,8 +399,21 @@ func (s *Server) authenticateRequest(r *http.Request) (*DashboardUser, string, e
 		user.LastLoginAt = &value
 	}
 
-	_, _ = s.db.Exec(`UPDATE Sessions SET last_seen_at = ? WHERE id = ?`, now, sessionID)
+	if _, err := s.db.Exec(`UPDATE Sessions SET last_seen_at = ? WHERE id = ?`, now, sessionID); err != nil && !isTransientSQLiteBusyError(err) {
+		logger.LogDebug(fmt.Sprintf("dashboard session last_seen update failed: %v", err))
+	}
 	return &user, tokenHash, nil
+}
+
+func isTransientSQLiteBusyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database table is locked") ||
+		strings.Contains(message, "database is busy") ||
+		strings.Contains(message, "sql logic error: database is locked")
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
