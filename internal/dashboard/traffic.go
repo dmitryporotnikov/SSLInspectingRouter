@@ -247,6 +247,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			BodyArtifactsEnabled      *bool   `json:"body_artifacts_enabled"`
 			BodyArtifactsDirectoryRaw string  `json:"body_artifacts_directory"`
 			TruncateLogEnabled        *bool   `json:"truncate_log_enabled"`
+			LogNothingEnabled         *bool   `json:"log_nothing_enabled"`
 			WireGuardEnabled          *bool   `json:"wireguard_enabled"`
 			WireGuardConfigRaw        *string `json:"wireguard_config"`
 		}
@@ -259,6 +260,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			payload.BodyArtifactsEnabled == nil &&
 			strings.TrimSpace(payload.BodyArtifactsDirectoryRaw) == "" &&
 			payload.TruncateLogEnabled == nil &&
+			payload.LogNothingEnabled == nil &&
 			payload.WireGuardEnabled == nil &&
 			payload.WireGuardConfigRaw == nil {
 			writeJSONError(w, http.StatusBadRequest, "at least one setting field is required")
@@ -288,6 +290,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if payload.TruncateLogEnabled != nil {
 			logger.SetLogTruncation(*payload.TruncateLogEnabled)
 			s.truncateLog.Store(*payload.TruncateLogEnabled)
+		}
+		if payload.LogNothingEnabled != nil {
+			logger.SetTrafficLogging(!*payload.LogNothingEnabled)
 		}
 
 		if payload.WireGuardConfigRaw != nil {
@@ -370,6 +375,7 @@ func (s *Server) currentStatusPayload() map[string]any {
 		"db_size_bytes":            dbSize,
 		"inspection_enabled":       inspectionEnabled,
 		"truncate_log_enabled":     s.truncateLog.Load(),
+		"log_nothing_enabled":      !logger.IsTrafficLoggingEnabled(),
 		"request_count":            requestCount,
 		"active_sessions":          activeSessions,
 		"session_ttl_seconds":      int64(s.sessionTTL.Seconds()),

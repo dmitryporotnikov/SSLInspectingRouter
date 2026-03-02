@@ -246,6 +246,7 @@ Authenticated endpoints:
 
 * `inspection_enabled` (bool)
 * `truncate_log_enabled` (bool)
+* `log_nothing_enabled` (bool; when true, traffic capture logging is disabled and DB stops growing)
 * `body_artifacts_enabled` (bool)
 * `body_artifacts_directory` (string, optional; can also be changed from the dashboard Body Artifacts path control)
 * `wireguard_enabled` (bool)
@@ -259,6 +260,7 @@ Authenticated endpoints:
 * `pcap_path` (string)
 * `inspection_enabled` (bool)
 * `truncate_log_enabled` (bool)
+* `log_nothing_enabled` (bool)
 * `body_artifacts_enabled` (bool)
 * `body_artifacts_directory` (string)
 * `db_size_bytes` (int64)

@@ -38,6 +38,7 @@ const (
 )
 
 var truncateLogs atomic.Bool
+var trafficLoggingEnabled atomic.Bool
 
 type bodyPreviewAnalysis struct {
 	ShowAsText      bool
@@ -52,6 +53,16 @@ func SetLogTruncation(enabled bool) {
 
 func IsLogTruncationEnabled() bool {
 	return truncateLogs.Load()
+}
+
+// SetTrafficLogging enables or disables capture logging to SQLite/artifacts.
+func SetTrafficLogging(enabled bool) {
+	trafficLoggingEnabled.Store(enabled)
+}
+
+// IsTrafficLoggingEnabled reports current capture logging state.
+func IsTrafficLoggingEnabled() bool {
+	return trafficLoggingEnabled.Load()
 }
 
 func SetBinaryBodyArtifactStorage(enabled bool, dir string) error {
@@ -88,6 +99,7 @@ func LogBodyLimit() int {
 
 func init() {
 	consoleLogs.Store(true)
+	trafficLoggingEnabled.Store(true)
 	bodyArtifactDir = resolveBodyArtifactDir()
 	if consoleRequestsOnly {
 		log.SetOutput(io.Discard)
@@ -334,6 +346,9 @@ func LogDebug(message string) {
 
 // LogConsoleRequest prints only the source IP and FQDN to the console.
 func LogConsoleRequest(sourceIP, fqdn string) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	if !consoleLogs.Load() {
 		return
 	}
@@ -347,6 +362,9 @@ func LogConsoleRequest(sourceIP, fqdn string) {
 
 // LogHTTPRequest writes HTTP request details to SQLite.
 func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
@@ -369,6 +387,9 @@ func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, bod
 
 // LogHTTPSRequest writes HTTPS request details to SQLite.
 func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, body []byte) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("%s %s", method, url)
 	content := formatContent(headers, body)
@@ -391,6 +412,9 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 
 // LogHTTPResponse writes HTTP response details to SQLite.
 func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	analysis := analyzeBodyPreview(headers, bodyPreview)
 	artifactPath := maybeStoreBodyArtifact("http_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
 	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
@@ -411,6 +435,9 @@ func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.He
 
 // LogHTTPSResponse writes HTTPS response details to SQLite.
 func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	analysis := analyzeBodyPreview(headers, bodyPreview)
 	artifactPath := maybeStoreBodyArtifact("https_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
 	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
@@ -431,6 +458,9 @@ func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.H
 
 // LogDNSRequest writes DNS request details to SQLite.
 func LogDNSRequest(sourceIP, fqdn, queryType string) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	requestLine := fmt.Sprintf("DNS QUERY %s", queryType)
 	id, _ := insertRequest(sourceIP, fqdn, requestLine, "")
@@ -439,11 +469,17 @@ func LogDNSRequest(sourceIP, fqdn, queryType string) int64 {
 
 // LogDNSResponse writes DNS response details to SQLite.
 func LogDNSResponse(reqID int64, sourceIP, fqdn, summary, content string) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	insertResponse(reqID, sourceIP, fqdn, summary, content)
 }
 
 // LogTLSRequest logs a non-HTTP TLS request (e.g. blocked by SNI) to SQLite.
 func LogTLSRequest(sourceIP, fqdn, note string) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	id, _ := insertRequest(sourceIP, fqdn, note, "")
 	return id
@@ -451,6 +487,9 @@ func LogTLSRequest(sourceIP, fqdn, note string) int64 {
 
 // LogBypassedRequest records a bypassed request without storing payload details.
 func LogBypassedRequest(sourceIP, fqdn string) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	id, _ := insertRequest(sourceIP, fqdn, "BYPASSED", "")
 	return id
@@ -458,11 +497,17 @@ func LogBypassedRequest(sourceIP, fqdn string) int64 {
 
 // LogBypassedResponse records a bypassed response without storing payload details.
 func LogBypassedResponse(reqID int64, sourceIP, fqdn string) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	insertResponse(reqID, sourceIP, fqdn, "BYPASSED", "")
 }
 
 // LogInspectionPausedRequest records a tunnelled TLS request while active inspection is paused.
 func LogInspectionPausedRequest(sourceIP, fqdn string) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
 	LogConsoleRequest(sourceIP, fqdn)
 	id, _ := insertRequest(sourceIP, fqdn, "INSPECTION PAUSED", "")
 	return id
@@ -470,11 +515,14 @@ func LogInspectionPausedRequest(sourceIP, fqdn string) int64 {
 
 // LogInspectionPausedResponse records a tunnelled TLS response while active inspection is paused.
 func LogInspectionPausedResponse(reqID int64, sourceIP, fqdn string) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
 	insertResponse(reqID, sourceIP, fqdn, "INSPECTION PAUSED", "")
 }
 
 func insertRequest(sourceIP, fqdn, requestLine, content string) (int64, error) {
-	if DB == nil {
+	if DB == nil || !trafficLoggingEnabled.Load() {
 		return 0, nil
 	}
 	logMutex.Lock()
@@ -490,7 +538,7 @@ func insertRequest(sourceIP, fqdn, requestLine, content string) (int64, error) {
 }
 
 func insertResponse(id int64, sourceIP, fqdn, responseLine, content string) {
-	if DB == nil {
+	if DB == nil || id <= 0 || !trafficLoggingEnabled.Load() {
 		return
 	}
 	logMutex.Lock()

@@ -63,6 +63,8 @@ const dom = {
     inspectionToggle: document.getElementById("inspection-toggle"),
     truncateLogWrap: document.getElementById("truncate-log-wrap"),
     truncateLogToggle: document.getElementById("truncate-log-toggle"),
+    logNothingWrap: document.getElementById("log-nothing-wrap"),
+    logNothingToggle: document.getElementById("log-nothing-toggle"),
     wireguardWrap: document.getElementById("wireguard-wrap"),
     wireguardToggle: document.getElementById("wireguard-toggle"),
     wireguardConfigInput: document.getElementById("wireguard-config-input"),
@@ -484,6 +486,9 @@ function bindEvents() {
     dom.truncateLogToggle.addEventListener("change", () => {
         void updateTruncateLog(dom.truncateLogToggle.checked);
     });
+    dom.logNothingToggle.addEventListener("change", () => {
+        void updateLogNothing(dom.logNothingToggle.checked);
+    });
     dom.wireguardToggle.addEventListener("change", () => {
         void updateWireGuard(dom.wireguardToggle.checked);
     });
@@ -661,6 +666,7 @@ function handleSessionExpired() {
     dom.egressInterfaceValue.textContent = "-";
     dom.defaultEgressInterfaceValue.textContent = "-";
     dom.truncateLogToggle.checked = false;
+    dom.logNothingToggle.checked = false;
     dom.rewriteCount.textContent = "0";
     dom.rewriteManagedFile.textContent = "managed file: -";
     resetUserForm();
@@ -718,6 +724,7 @@ function applyStatus(status) {
     }
     dom.inspectionToggle.checked = !!status.inspection_enabled;
     dom.truncateLogToggle.checked = !!status.truncate_log_enabled;
+    dom.logNothingToggle.checked = !!status.log_nothing_enabled;
     dom.wireguardToggle.checked = !!status.wireguard_enabled;
     dom.bodyArtifactsToggle.checked = !!status.body_artifacts_enabled;
 
@@ -862,6 +869,19 @@ async function updateTruncateLog(enabled) {
         await updateDashboardSettings({ truncate_log_enabled: enabled });
     } catch (error) {
         dom.truncateLogToggle.checked = !enabled;
+        alert(error.message);
+    }
+}
+
+async function updateLogNothing(enabled) {
+    if (!isAdmin()) {
+        return;
+    }
+
+    try {
+        await updateDashboardSettings({ log_nothing_enabled: enabled });
+    } catch (error) {
+        dom.logNothingToggle.checked = !enabled;
         alert(error.message);
     }
 }
