@@ -19,6 +19,14 @@ if ! command -v iptables &> /dev/null; then
     exit 1
 fi
 
+if ! command -v wg-quick &> /dev/null; then
+    echo "WARNING: wg-quick not found. WireGuard egress toggle in Web UI will not work until installed (sudo apt install wireguard-tools)."
+fi
+
+if ! command -v ip &> /dev/null; then
+    echo "WARNING: iproute2 'ip' command not found. WireGuard status checks will be unavailable."
+fi
+
 if ! command -v go &> /dev/null; then
     echo "WARNING: Go not found. Install with: sudo apt install golang"
 fi

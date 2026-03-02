@@ -47,6 +47,14 @@ To make the Linux host function as an actual gateway, `FirewallManager` also:
 
 This is what allows routed client traffic to pass through the box instead of being blackholed.
 
+Optionally, routed traffic can be sent through a WireGuard client tunnel:
+
+```
+Client -> SSLInspectingRouter -> WireGuard tunnel -> Internet
+```
+
+This is controlled at runtime from the Web Dashboard Control Center.
+
 ### SSL/TLS Interception
 For encrypted traffic, the proxy acts as a Certificate Authority (CA). It dynamically generates certificates for each host on demand (`cert.go`).
 > **Note:** To avoid TLS handshake failures, clients must trust the generated `ca-cert.pem`.
@@ -76,6 +84,7 @@ sudo ./sslinspectingrouter
 ```
 
 On the first run, the router generates `ca-cert.pem` and `ca-key.pem`. These are reused on subsequent runs.
+The project root also contains a `wireguard/` directory for WireGuard client configs (for example `wireguard/wg0.conf`).
 
 ### Command Line Arguments
 
@@ -130,6 +139,25 @@ You can combine multiple flags. For example, to block specific domains, start th
 ```bash
 sudo ./sslinspectingrouter -drop test.com,test2.com -web :3000 -truncatelog
 ```
+
+### WireGuard Egress (Web UI Runtime Toggle)
+
+Use this when you want clients behind the router to reach destinations from a different public IP (for example through a VPS tunnel).
+
+1. Start the router with dashboard enabled:
+
+```bash
+sudo ./sslinspectingrouter -web :3000
+```
+
+2. Open the dashboard as admin.
+3. In `Control Center`:
+   * Paste a WireGuard client config in `WireGuard Client Config` and click `Save WireGuard Config`, **or**
+   * Place a `.conf` file directly into project `wireguard/` directory.
+4. Enable `WireGuard Egress` toggle.
+
+When enabled, the router switches egress NAT to the WireGuard interface so forwarded client traffic and router-originated upstream traffic exit through the tunnel.
+Disable the toggle to revert to the original default egress interface.
 
 **Example: Inspect non-standard TLS ports**
 
@@ -202,6 +230,8 @@ Authenticated endpoints:
 * `truncate_log_enabled` (bool)
 * `body_artifacts_enabled` (bool)
 * `body_artifacts_directory` (string, optional; can also be changed from the dashboard Body Artifacts path control)
+* `wireguard_enabled` (bool)
+* `wireguard_config` (string; WireGuard client config content)
 
 `GET /api/v1/status` also returns startup flag visibility fields for the dashboard settings panel:
 
@@ -209,6 +239,12 @@ Authenticated endpoints:
 * `additional_tls_ports` ([]int)
 * `inspect_only_sources` ([]string)
 * `pcap_path` (string)
+* `wireguard_enabled` (bool)
+* `wireguard_interface` (string)
+* `wireguard_config_present` (bool)
+* `wireguard_config_path` (string)
+* `egress_interface` (string)
+* `default_egress_interface` (string)
 
 `PUT /api/v1/policy` accepts runtime admin policy lists:
 

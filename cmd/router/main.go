@@ -22,6 +22,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
 
 const (
@@ -122,6 +123,12 @@ func main() {
 		firewallManager.EnableInspectOnly(inspectOnlyList)
 	}
 
+	wireGuardManager, err := wireguard.NewManager(wireguard.DefaultDir())
+	if err != nil {
+		logger.LogError(fmt.Sprintf("WireGuard manager initialization failed: %v", err))
+		os.Exit(1)
+	}
+
 	var dnsProxy *dnsproxy.DNSProxy
 	if blockList != nil && blockList.Count() > 0 {
 		dnsProxy, err = dnsproxy.NewDNSProxy(dnsproxy.DNS_PROXY_PORT, blockList)
@@ -152,7 +159,7 @@ func main() {
 	}
 
 	// Ensure cleaner shutdown of firewall rules on interrupt
-	setupCleanupHandler(firewallManager)
+	setupCleanupHandler(firewallManager, wireGuardManager)
 
 	rewriter := rewrites.NewEngine(rewrites.DefaultDir())
 	if stats, err := rewriter.LoadNow(); err != nil {
@@ -184,6 +191,8 @@ func main() {
 					InspectOnlySources: inspectOnlyList,
 					PCAPPath:           *pcapFlag,
 					TruncateLog:        *truncateLog,
+					Egress:             firewallManager,
+					WireGuard:          wireGuardManager,
 				},
 			}
 			if err := dashboard.StartWithOptions(logger.DB, *webFlag, httpsHandler, rewriter, options); err != nil {
@@ -246,13 +255,19 @@ func main() {
 }
 
 // setupCleanupHandler ensures iptables rules are flushed on SIGINT/SIGTERM.
-func setupCleanupHandler(firewallManager *firewall.FirewallManager) {
+func setupCleanupHandler(firewallManager *firewall.FirewallManager, wireGuardManager *wireguard.Manager) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-c
 		logger.LogInfo("Shutting down...")
+
+		if wireGuardManager != nil {
+			if _, err := wireGuardManager.Disable(); err != nil {
+				logger.LogError(fmt.Sprintf("WireGuard cleanup failed: %v", err))
+			}
+		}
 
 		if err := firewallManager.Cleanup(); err != nil {
 			logger.LogError(fmt.Sprintf("Firewall cleanup failed: %v", err))

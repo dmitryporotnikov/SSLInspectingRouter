@@ -31,3 +31,10 @@ go.work.sum
 ca-cert.pem
 ca-key.pem
 ca-req.pem
+
+#Logs
+logs/*
+
+# WireGuard runtime material (may contain private keys)
+wireguard/*.conf
+wireguard/*.key

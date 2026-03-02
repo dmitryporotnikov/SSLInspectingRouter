@@ -63,6 +63,12 @@ const dom = {
     inspectionToggle: document.getElementById("inspection-toggle"),
     truncateLogWrap: document.getElementById("truncate-log-wrap"),
     truncateLogToggle: document.getElementById("truncate-log-toggle"),
+    wireguardWrap: document.getElementById("wireguard-wrap"),
+    wireguardToggle: document.getElementById("wireguard-toggle"),
+    wireguardConfigInput: document.getElementById("wireguard-config-input"),
+    wireguardConfigSave: document.getElementById("wireguard-config-save"),
+    wireguardConfigStatus: document.getElementById("wireguard-config-status"),
+    wireguardMetaValue: document.getElementById("wireguard-meta-value"),
     bodyArtifactsWrap: document.getElementById("body-artifacts-wrap"),
     bodyArtifactsToggle: document.getElementById("body-artifacts-toggle"),
     bodyArtifactsPathWrap: document.getElementById("body-artifacts-path-wrap"),
@@ -81,6 +87,8 @@ const dom = {
     tlsPortsValue: document.getElementById("tls-ports-value"),
     inspectOnlyValue: document.getElementById("inspect-only-value"),
     pcapPathValue: document.getElementById("pcap-path-value"),
+    egressInterfaceValue: document.getElementById("egress-interface-value"),
+    defaultEgressInterfaceValue: document.getElementById("default-egress-interface-value"),
     logoutBtn: document.getElementById("logout-btn"),
     metricConnection: document.getElementById("metric-connection"),
     metricDBSize: document.getElementById("metric-db-size"),
@@ -476,6 +484,18 @@ function bindEvents() {
     dom.truncateLogToggle.addEventListener("change", () => {
         void updateTruncateLog(dom.truncateLogToggle.checked);
     });
+    dom.wireguardToggle.addEventListener("change", () => {
+        void updateWireGuard(dom.wireguardToggle.checked);
+    });
+    dom.wireguardConfigSave.addEventListener("click", () => {
+        void saveWireGuardConfig();
+    });
+    dom.wireguardConfigInput.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+            event.preventDefault();
+            void saveWireGuardConfig();
+        }
+    });
     dom.bodyArtifactsToggle.addEventListener("change", () => {
         void updateBodyArtifacts(dom.bodyArtifactsToggle.checked);
     });
@@ -624,15 +644,22 @@ function handleSessionExpired() {
     dom.bodyArtifactsDir.textContent = "disabled";
     dom.bodyArtifactsDir.title = "disabled";
     dom.bodyArtifactsDirectoryInput.value = "";
+    dom.wireguardConfigInput.value = "";
     dom.dropListCount.textContent = "0";
     dom.bypassListCount.textContent = "0";
     dom.dropListInput.value = "";
     dom.bypassListInput.value = "";
     dom.policySaveStatus.textContent = "";
+    dom.wireguardConfigStatus.textContent = "";
+    dom.wireguardMetaValue.textContent = "inactive";
+    dom.wireguardMetaValue.title = "inactive";
+    dom.wireguardToggle.checked = false;
     dom.allowQuicValue.textContent = "-";
     dom.tlsPortsValue.textContent = "default";
     dom.inspectOnlyValue.textContent = "all sources";
     dom.pcapPathValue.textContent = "disabled";
+    dom.egressInterfaceValue.textContent = "-";
+    dom.defaultEgressInterfaceValue.textContent = "-";
     dom.truncateLogToggle.checked = false;
     dom.rewriteCount.textContent = "0";
     dom.rewriteManagedFile.textContent = "managed file: -";
@@ -691,6 +718,7 @@ function applyStatus(status) {
     }
     dom.inspectionToggle.checked = !!status.inspection_enabled;
     dom.truncateLogToggle.checked = !!status.truncate_log_enabled;
+    dom.wireguardToggle.checked = !!status.wireguard_enabled;
     dom.bodyArtifactsToggle.checked = !!status.body_artifacts_enabled;
 
     const artifactsDir = String(status.body_artifacts_directory || "").trim();
@@ -735,6 +763,28 @@ function applyStatus(status) {
         dom.pcapPathValue.textContent = "disabled";
         dom.pcapPathValue.title = "disabled";
     }
+
+    const wireguardEnabled = !!status.wireguard_enabled;
+    const wireguardInterface = String(status.wireguard_interface || "").trim();
+    const wireguardConfigPresent = !!status.wireguard_config_present;
+    const wireguardConfigPath = String(status.wireguard_config_path || "").trim();
+    let wireguardMeta = wireguardEnabled ? "active" : "inactive";
+    if (wireguardInterface) {
+        wireguardMeta += ` (${wireguardInterface})`;
+    }
+    if (!wireguardConfigPresent) {
+        wireguardMeta += " | no config";
+    }
+    dom.wireguardMetaValue.textContent = wireguardMeta;
+    dom.wireguardMetaValue.title = wireguardConfigPath || wireguardMeta;
+
+    const egressInterface = String(status.egress_interface || "").trim();
+    dom.egressInterfaceValue.textContent = egressInterface || "-";
+    dom.egressInterfaceValue.title = egressInterface || "-";
+
+    const defaultEgressInterface = String(status.default_egress_interface || "").trim();
+    dom.defaultEgressInterfaceValue.textContent = defaultEgressInterface || "-";
+    dom.defaultEgressInterfaceValue.title = defaultEgressInterface || "-";
 }
 
 function parsePolicyEntries(value) {
@@ -813,6 +863,55 @@ async function updateTruncateLog(enabled) {
     } catch (error) {
         dom.truncateLogToggle.checked = !enabled;
         alert(error.message);
+    }
+}
+
+async function updateWireGuard(enabled) {
+    if (!isAdmin()) {
+        return;
+    }
+
+    dom.wireguardConfigStatus.textContent = enabled ? "Enabling tunnel..." : "Disabling tunnel...";
+    dom.wireguardToggle.disabled = true;
+
+    try {
+        await updateDashboardSettings({ wireguard_enabled: enabled });
+        dom.wireguardConfigStatus.textContent = enabled ? "WireGuard tunnel enabled." : "WireGuard tunnel disabled.";
+    } catch (error) {
+        dom.wireguardToggle.checked = !enabled;
+        dom.wireguardConfigStatus.textContent = "";
+        alert(error.message);
+    } finally {
+        dom.wireguardToggle.disabled = false;
+    }
+}
+
+async function saveWireGuardConfig() {
+    if (!isAdmin()) {
+        return;
+    }
+
+    const config = dom.wireguardConfigInput.value;
+    if (!config || !config.trim()) {
+        alert("WireGuard config cannot be empty.");
+        dom.wireguardConfigInput.focus();
+        return;
+    }
+
+    dom.wireguardConfigSave.disabled = true;
+    dom.wireguardConfigStatus.textContent = "Saving config...";
+
+    try {
+        await updateDashboardSettings({ wireguard_config: config });
+        const active = !!(state.status && state.status.wireguard_enabled);
+        dom.wireguardConfigStatus.textContent = active
+            ? "Config saved. Toggle tunnel off/on to apply."
+            : "WireGuard config saved.";
+    } catch (error) {
+        dom.wireguardConfigStatus.textContent = "";
+        alert(error.message);
+    } finally {
+        dom.wireguardConfigSave.disabled = false;
     }
 }
 

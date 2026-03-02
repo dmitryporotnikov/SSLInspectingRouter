@@ -2,12 +2,14 @@ package dashboard
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
 
 // TrafficEntry is a summarized view of captured traffic rows.
@@ -241,17 +243,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var payload struct {
-			InspectionEnabled         *bool  `json:"inspection_enabled"`
-			BodyArtifactsEnabled      *bool  `json:"body_artifacts_enabled"`
-			BodyArtifactsDirectoryRaw string `json:"body_artifacts_directory"`
-			TruncateLogEnabled        *bool  `json:"truncate_log_enabled"`
+			InspectionEnabled         *bool   `json:"inspection_enabled"`
+			BodyArtifactsEnabled      *bool   `json:"body_artifacts_enabled"`
+			BodyArtifactsDirectoryRaw string  `json:"body_artifacts_directory"`
+			TruncateLogEnabled        *bool   `json:"truncate_log_enabled"`
+			WireGuardEnabled          *bool   `json:"wireguard_enabled"`
+			WireGuardConfigRaw        *string `json:"wireguard_config"`
 		}
 		if err := decodeJSONBody(r, &payload); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid JSON payload")
 			return
 		}
 
-		if payload.InspectionEnabled == nil && payload.BodyArtifactsEnabled == nil && strings.TrimSpace(payload.BodyArtifactsDirectoryRaw) == "" && payload.TruncateLogEnabled == nil {
+		if payload.InspectionEnabled == nil &&
+			payload.BodyArtifactsEnabled == nil &&
+			strings.TrimSpace(payload.BodyArtifactsDirectoryRaw) == "" &&
+			payload.TruncateLogEnabled == nil &&
+			payload.WireGuardEnabled == nil &&
+			payload.WireGuardConfigRaw == nil {
 			writeJSONError(w, http.StatusBadRequest, "at least one setting field is required")
 			return
 		}
@@ -279,6 +288,28 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		if payload.TruncateLogEnabled != nil {
 			logger.SetLogTruncation(*payload.TruncateLogEnabled)
 			s.truncateLog.Store(*payload.TruncateLogEnabled)
+		}
+
+		if payload.WireGuardConfigRaw != nil {
+			if s.wireguardRuntime == nil {
+				writeJSONError(w, http.StatusServiceUnavailable, "wireguard runtime unavailable")
+				return
+			}
+			if _, err := s.wireguardRuntime.SaveConfig(*payload.WireGuardConfigRaw); err != nil {
+				writeJSONError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+
+		if payload.WireGuardEnabled != nil {
+			if err := s.applyWireGuardState(*payload.WireGuardEnabled); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, wireguard.ErrConfigNotFound) || errors.Is(err, wireguard.ErrConfigEmpty) {
+					statusCode = http.StatusBadRequest
+				}
+				writeJSONError(w, statusCode, err.Error())
+				return
+			}
 		}
 
 		status := s.currentStatusPayload()
@@ -313,6 +344,27 @@ func (s *Server) currentStatusPayload() map[string]any {
 	bodyArtifactsEnabled, bodyArtifactsDirectory := logger.BinaryBodyArtifactStorage()
 	ports := append([]int(nil), s.additionalTLSPorts...)
 	inspectOnly := append([]string(nil), s.inspectOnlySources...)
+	wireGuardEnabled := false
+	wireGuardInterface := ""
+	wireGuardConfigPresent := false
+	wireGuardConfigPath := ""
+	if s.wireguardRuntime != nil {
+		wireGuardStatus, err := s.wireguardRuntime.Status()
+		if err != nil {
+			logger.LogDebug(fmt.Sprintf("dashboard status wireguard query failed: %v", err))
+		} else {
+			wireGuardEnabled = wireGuardStatus.Enabled
+			wireGuardInterface = wireGuardStatus.Interface
+			wireGuardConfigPresent = wireGuardStatus.ConfigPresent
+			wireGuardConfigPath = wireGuardStatus.ConfigPath
+		}
+	}
+	egressInterface := ""
+	defaultEgressInterface := ""
+	if s.egressRuntime != nil {
+		egressInterface = strings.TrimSpace(s.egressRuntime.EgressInterface())
+		defaultEgressInterface = strings.TrimSpace(s.egressRuntime.DefaultEgressInterface())
+	}
 
 	return map[string]any{
 		"db_size_bytes":            dbSize,
@@ -328,7 +380,57 @@ func (s *Server) currentStatusPayload() map[string]any {
 		"additional_tls_ports":     ports,
 		"inspect_only_sources":     inspectOnly,
 		"pcap_path":                s.pcapPath,
+		"wireguard_enabled":        wireGuardEnabled,
+		"wireguard_interface":      wireGuardInterface,
+		"wireguard_config_present": wireGuardConfigPresent,
+		"wireguard_config_path":    wireGuardConfigPath,
+		"egress_interface":         egressInterface,
+		"default_egress_interface": defaultEgressInterface,
 	}
+}
+
+func (s *Server) applyWireGuardState(enabled bool) error {
+	if s.wireguardRuntime == nil {
+		return fmt.Errorf("wireguard runtime unavailable")
+	}
+
+	if enabled {
+		status, err := s.wireguardRuntime.Enable()
+		if err != nil {
+			return err
+		}
+
+		if s.egressRuntime != nil {
+			iface := strings.TrimSpace(status.Interface)
+			if iface == "" {
+				return fmt.Errorf("wireguard enabled but interface name is empty")
+			}
+			if err := s.egressRuntime.SetEgressInterface(iface); err != nil {
+				_, _ = s.wireguardRuntime.Disable()
+				return fmt.Errorf("wireguard enabled but failed to switch egress interface: %w", err)
+			}
+		}
+		return nil
+	}
+
+	if _, err := s.wireguardRuntime.Disable(); err != nil {
+		return err
+	}
+	if s.egressRuntime == nil {
+		return nil
+	}
+
+	restoreInterface := strings.TrimSpace(s.egressRuntime.DefaultEgressInterface())
+	if restoreInterface == "" {
+		restoreInterface = strings.TrimSpace(s.egressRuntime.EgressInterface())
+	}
+	if restoreInterface == "" {
+		return nil
+	}
+	if err := s.egressRuntime.SetEgressInterface(restoreInterface); err != nil {
+		return fmt.Errorf("wireguard disabled but failed to restore egress interface: %w", err)
+	}
+	return nil
 }
 
 func parseRequestLine(requestLine string) (method, url string) {

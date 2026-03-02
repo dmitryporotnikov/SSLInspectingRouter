@@ -693,6 +693,32 @@ select:focus {
     font-size: 0.76rem;
 }
 
+#wireguard-config-input {
+    min-height: 140px;
+    width: 100%;
+    min-width: 0;
+    resize: vertical;
+    background: var(--surface-soft);
+    color: var(--text-main);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+    font-family: 'IBM Plex Mono', monospace;
+    line-height: 1.32;
+    font-size: 0.8rem;
+}
+
+#wireguard-config-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(31, 110, 212, 0.12);
+}
+
+#wireguard-config-status {
+    font-size: 0.76rem;
+}
+
 .rewrites-layout {
     display: grid;
     grid-template-columns: 320px minmax(0, 1fr);

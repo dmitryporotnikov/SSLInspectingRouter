@@ -28,6 +28,7 @@ type FirewallManager struct {
 	inspectOnlyIPs     []string
 	additionalTLSPorts []int
 	egressInterface    string
+	defaultEgressIF    string
 	rules              []string
 }
 
@@ -42,6 +43,7 @@ func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
 		inspectOnlyIPs:     make([]string, 0),
 		additionalTLSPorts: make([]int, 0),
 		egressInterface:    "",
+		defaultEgressIF:    "",
 		rules:              make([]string, 0),
 	}
 }
@@ -92,6 +94,10 @@ func (fm *FirewallManager) Setup() error {
 			return fmt.Errorf("failed to detect default egress interface: %v", err)
 		}
 		fm.egressInterface = iface
+		fm.defaultEgressIF = iface
+	}
+	if fm.defaultEgressIF == "" {
+		fm.defaultEgressIF = fm.egressInterface
 	}
 
 	// Create custom chain SSLPROXY to manage our rules cleanly
@@ -341,12 +347,10 @@ func (fm *FirewallManager) Cleanup() error {
 		}
 	}
 	if fm.egressInterface != "" {
-		fm.deleteRuleCompletely([]string{
-			"-t", "nat", "-A", "POSTROUTING",
-			"-o", fm.egressInterface,
-			"-m", "comment", "--comment", masqueradeRuleComment,
-			"-j", "MASQUERADE",
-		})
+		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.egressInterface))
+	}
+	if fm.defaultEgressIF != "" && fm.defaultEgressIF != fm.egressInterface {
+		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.defaultEgressIF))
 	}
 
 	logger.LogInfo("iptables rules cleaned up.")
@@ -390,12 +394,10 @@ func (fm *FirewallManager) cleanLegacyRules() {
 		"-j", "ACCEPT",
 	})
 	if fm.egressInterface != "" {
-		fm.deleteRuleCompletely([]string{
-			"-t", "nat", "-A", "POSTROUTING",
-			"-o", fm.egressInterface,
-			"-m", "comment", "--comment", masqueradeRuleComment,
-			"-j", "MASQUERADE",
-		})
+		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.egressInterface))
+	}
+	if fm.defaultEgressIF != "" && fm.defaultEgressIF != fm.egressInterface {
+		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.defaultEgressIF))
 	}
 }
 
@@ -425,6 +427,43 @@ func (fm *FirewallManager) GetHTTPSPort() int {
 	return fm.httpsPort
 }
 
+func (fm *FirewallManager) EgressInterface() string {
+	return fm.egressInterface
+}
+
+func (fm *FirewallManager) DefaultEgressInterface() string {
+	if fm.defaultEgressIF != "" {
+		return fm.defaultEgressIF
+	}
+	return fm.egressInterface
+}
+
+// SetEgressInterface switches outbound NAT masquerading to a target interface.
+func (fm *FirewallManager) SetEgressInterface(iface string) error {
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return fmt.Errorf("egress interface cannot be empty")
+	}
+
+	if fm.egressInterface != "" && fm.egressInterface != iface {
+		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.egressInterface))
+	}
+
+	masqueradeRule := masqueradeRuleForInterface(iface)
+	fm.deleteRuleCompletely(masqueradeRule)
+	if err := fm.runIPTables(masqueradeRule...); err != nil {
+		return fmt.Errorf("failed to add POSTROUTING masquerade rule on %s: %v", iface, err)
+	}
+	fm.rules = append(fm.rules, strings.Join(masqueradeRule, " "))
+
+	fm.egressInterface = iface
+	if fm.defaultEgressIF == "" {
+		fm.defaultEgressIF = iface
+	}
+	logger.LogInfo(fmt.Sprintf("Gateway egress interface: %s", fm.egressInterface))
+	return nil
+}
+
 func (fm *FirewallManager) configureGatewayForwarding() error {
 	forwardEstablishedRule := []string{
 		"-t", "filter", "-A", "FORWARD",
@@ -449,17 +488,9 @@ func (fm *FirewallManager) configureGatewayForwarding() error {
 	}
 	fm.rules = append(fm.rules, strings.Join(forwardAllowRule, " "))
 
-	masqueradeRule := []string{
-		"-t", "nat", "-A", "POSTROUTING",
-		"-o", fm.egressInterface,
-		"-m", "comment", "--comment", masqueradeRuleComment,
-		"-j", "MASQUERADE",
+	if err := fm.SetEgressInterface(fm.egressInterface); err != nil {
+		return err
 	}
-	fm.deleteRuleCompletely(masqueradeRule)
-	if err := fm.runIPTables(masqueradeRule...); err != nil {
-		return fmt.Errorf("failed to add POSTROUTING masquerade rule on %s: %v", fm.egressInterface, err)
-	}
-	fm.rules = append(fm.rules, strings.Join(masqueradeRule, " "))
 
 	return nil
 }
@@ -520,4 +551,13 @@ func detectDefaultEgressInterface() (string, error) {
 	}
 
 	return "", fmt.Errorf("default route interface not found")
+}
+
+func masqueradeRuleForInterface(iface string) []string {
+	return []string{
+		"-t", "nat", "-A", "POSTROUTING",
+		"-o", iface,
+		"-m", "comment", "--comment", masqueradeRuleComment,
+		"-j", "MASQUERADE",
+	}
 }

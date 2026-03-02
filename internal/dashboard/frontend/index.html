@@ -91,6 +91,13 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        <div class="switch-wrap compact-switch" id="wireguard-wrap">
+                            <span>WireGuard Egress</span>
+                            <label class="switch">
+                                <input type="checkbox" id="wireguard-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                         <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
                             <span>Body Artifacts</span>
                             <label class="switch">
@@ -106,6 +113,20 @@
                     <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
                         <input type="text" id="body-artifacts-directory-input" placeholder="Artifact directory">
                         <button type="button" class="btn btn-ghost" id="body-artifacts-save">Set Path</button>
+                    </div>
+                </details>
+
+                <details class="settings-fold" open>
+                    <summary>WireGuard Client Config</summary>
+                    <p class="muted settings-note">Paste a client config or place a <code>.conf</code> file in the project <code>wireguard/</code> directory.</p>
+                    <textarea id="wireguard-config-input" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;AllowedIPs = 0.0.0.0/0"></textarea>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-ghost" id="wireguard-config-save">Save WireGuard Config</button>
+                        <span class="muted" id="wireguard-config-status"></span>
+                    </div>
+                    <div class="meta-row">
+                        <span>Tunnel</span>
+                        <strong id="wireguard-meta-value" class="meta-value">inactive</strong>
                     </div>
                 </details>
 
@@ -146,6 +167,14 @@
                     <div class="meta-row">
                         <span>PCAP Path</span>
                         <strong id="pcap-path-value" class="meta-value">disabled</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span>Current Egress</span>
+                        <strong id="egress-interface-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span>Default Egress</span>
+                        <strong id="default-egress-interface-value" class="meta-value">-</strong>
                     </div>
                 </details>
             </section>
