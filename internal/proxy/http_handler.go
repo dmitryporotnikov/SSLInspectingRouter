@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,11 +85,16 @@ func (h *HTTPHandler) currentBypassList() *blocklist.BlockList {
 
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceIP := getSourceIP(r)
-	targetHost := requestHost(r)
+	fullURL, targetHost, err := buildProxyTarget(r)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Rejected HTTP request from %s: %v", sourceIP, err))
+		writePlainError(w, http.StatusBadRequest, "Bad Request")
+		return
+	}
 	blockList := h.currentBlockList()
 	bypassList := h.currentBypassList()
 
-	logger.LogDebug(fmt.Sprintf("HTTP request from %s: %s %s", sourceIP, r.Method, r.URL.String()))
+	logger.LogDebug(fmt.Sprintf("HTTP request from %s: %s %s", sourceIP, r.Method, fullURL))
 
 	bodyBytes := []byte{}
 	if r.Body != nil {
@@ -96,9 +103,9 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if blockList != nil && blockList.Matches(targetHost) {
-		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
+		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
 		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s", targetHost, sourceIP))
-		http.Error(w, "Blocked", http.StatusForbidden)
+		writePlainError(w, http.StatusForbidden, "Blocked")
 		logger.LogHTTPResponse(reqID, sourceIP, targetHost, "403 Forbidden", http.Header{}, []byte("Blocked"), false)
 		return
 	}
@@ -108,13 +115,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if bypassed {
 		reqID = logger.LogBypassedRequest(sourceIP, targetHost)
 	} else {
-		reqID = logger.LogHTTPRequest(sourceIP, targetHost, r.Method, getFullURL(r), r.Header, bodyBytes)
+		reqID = logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
 	}
 
-	proxyReq, err := http.NewRequest(r.Method, getFullURL(r), bytes.NewBuffer(bodyBytes))
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, fullURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Failed to create proxy request: %v", err))
-		http.Error(w, "Proxy Error", http.StatusInternalServerError)
+		writePlainError(w, http.StatusInternalServerError, "Proxy Error")
 		if bypassed {
 			logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		}
@@ -129,13 +136,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if proxyReq.Host == "" {
-		proxyReq.Host = r.Host
+		proxyReq.Host = proxyReq.URL.Host
 	}
 
 	resp, err := h.Client.Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
-		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		writePlainError(w, http.StatusBadGateway, "Bad Gateway")
 		if bypassed {
 			logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		} else {
@@ -170,7 +177,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rawBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTamperBodyBytes+1))
 			if err != nil {
 				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
-				http.Error(w, "Bad Gateway", http.StatusBadGateway)
+				writePlainError(w, http.StatusBadGateway, "Bad Gateway")
 				logger.LogHTTPResponse(reqID, sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
 				return
 			}
@@ -224,55 +231,172 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.LogDebug(fmt.Sprintf("HTTP completed: %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 }
 
-func getFullURL(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+func writePlainError(w http.ResponseWriter, status int, message string) {
+	if message == "" {
+		message = http.StatusText(status)
 	}
-
-	host := r.Host
-	if host == "" {
-		host = r.URL.Host
-	}
-
-	if r.URL.IsAbs() {
-		return r.URL.String()
-	}
-
-	return fmt.Sprintf("%s://%s%s", scheme, host, r.URL.RequestURI())
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, message)
 }
 
-func requestHost(r *http.Request) string {
-	host := r.Host
-	if host == "" {
-		host = r.URL.Host
+func buildProxyTarget(r *http.Request) (string, string, error) {
+	if r == nil || r.URL == nil {
+		return "", "", errors.New("request URL is missing")
 	}
-	if host == "" {
-		return ""
-	}
-	if strings.Contains(host, ":") && !strings.Contains(host, "]") {
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
+
+	scheme := strings.ToLower(strings.TrimSpace(r.URL.Scheme))
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
 		}
 	}
-	return host
+	if scheme != "http" && scheme != "https" {
+		return "", "", fmt.Errorf("unsupported target scheme %q", scheme)
+	}
+
+	hostInput := strings.TrimSpace(r.Host)
+	if r.URL.IsAbs() && strings.TrimSpace(r.URL.Host) != "" {
+		hostInput = strings.TrimSpace(r.URL.Host)
+	}
+	normalizedHost, hostOnly, err := normalizeURLHost(hostInput)
+	if err != nil {
+		return "", "", err
+	}
+
+	path := r.URL.Path
+	if path == "" {
+		path = "/"
+	}
+
+	targetURL := &url.URL{
+		Scheme:     scheme,
+		Host:       normalizedHost,
+		Path:       path,
+		RawPath:    r.URL.RawPath,
+		RawQuery:   r.URL.RawQuery,
+		ForceQuery: r.URL.ForceQuery,
+	}
+	return targetURL.String(), hostOnly, nil
+}
+
+func normalizeURLHost(raw string) (string, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", errors.New("target host is empty")
+	}
+	if strings.Contains(raw, "@") || strings.ContainsAny(raw, "/\\") || containsControlChars(raw) {
+		return "", "", fmt.Errorf("invalid target host %q", raw)
+	}
+
+	parsed, err := url.Parse("http://" + raw)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid target host %q", raw)
+	}
+
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" || containsControlChars(host) {
+		return "", "", fmt.Errorf("invalid target host %q", raw)
+	}
+
+	hostOnly := strings.TrimSuffix(strings.ToLower(host), ".")
+	if hostOnly == "" {
+		return "", "", fmt.Errorf("invalid target host %q", raw)
+	}
+	if ip := net.ParseIP(hostOnly); ip != nil {
+		hostOnly = ip.String()
+	}
+
+	port := strings.TrimSpace(parsed.Port())
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", "", fmt.Errorf("invalid target port %q", port)
+		}
+	}
+
+	hostForURL := hostOnly
+	if port != "" {
+		hostForURL = net.JoinHostPort(hostOnly, port)
+	} else if strings.Contains(hostOnly, ":") {
+		hostForURL = "[" + hostOnly + "]"
+	}
+
+	return hostForURL, hostOnly, nil
+}
+
+func containsControlChars(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 func getSourceIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
+	if ip := parseForwardedFor(r.Header.Get("X-Forwarded-For")); ip != "" {
+		return ip
 	}
 
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
+	if ip := parseIPAddress(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
 	}
 
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	remote := strings.TrimSpace(r.RemoteAddr)
+	ip, _, err := net.SplitHostPort(remote)
 	if err != nil {
-		return r.RemoteAddr
+		if parsed := parseIPAddress(remote); parsed != "" {
+			return parsed
+		}
+		if token := sanitizeTextToken(remote); token != "" {
+			return token
+		}
+		return "unknown"
 	}
-	return ip
+	if parsed := parseIPAddress(ip); parsed != "" {
+		return parsed
+	}
+	if token := sanitizeTextToken(ip); token != "" {
+		return token
+	}
+	return "unknown"
+}
+
+func parseForwardedFor(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		if ip := parseIPAddress(part); ip != "" {
+			return ip
+		}
+	}
+	return ""
+}
+
+func parseIPAddress(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	value = strings.Trim(value, "[]")
+	ip := net.ParseIP(strings.TrimSpace(value))
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
+}
+
+func sanitizeTextToken(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(value))
 }
 
 func copyHeaders(dst, src http.Header) {

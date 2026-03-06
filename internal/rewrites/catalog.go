@@ -55,7 +55,10 @@ func LoadRuleSources(dir string) ([]RuleSource, error) {
 
 	out := make([]RuleSource, 0, len(fileNames))
 	for _, name := range fileNames {
-		path := filepath.Join(dir, name)
+		path, err := safeRuleFilePath(dir, name)
+		if err != nil {
+			return nil, err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -76,4 +79,33 @@ func LoadRuleSources(dir string) ([]RuleSource, error) {
 	}
 
 	return out, nil
+}
+
+func safeRuleFilePath(dir, fileName string) (string, error) {
+	trimmedDir := strings.TrimSpace(dir)
+	if trimmedDir == "" {
+		return "", errors.New("rewrite directory is empty")
+	}
+	baseDir := filepath.Clean(trimmedDir)
+
+	name := strings.TrimSpace(fileName)
+	if name == "" {
+		return "", errors.New("rewrite filename is empty")
+	}
+	if filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid rewrite filename %q", fileName)
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".json") {
+		return "", fmt.Errorf("invalid rewrite file extension %q", fileName)
+	}
+
+	path := filepath.Join(baseDir, name)
+	rel, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("rewrite file escapes configured directory: %q", fileName)
+	}
+	return path, nil
 }

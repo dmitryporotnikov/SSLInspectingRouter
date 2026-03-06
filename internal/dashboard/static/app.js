@@ -51,6 +51,28 @@ const statusTextEl = document.getElementById('status-text');
 const dbSizeEl = document.getElementById('db-size');
 const limitSelect = document.getElementById('limit-select');
 const inspectionToggle = document.getElementById('inspection-toggle');
+const trafficBody = document.getElementById('traffic-body');
+const modalTitle = document.getElementById('modal-title');
+const modalOverlay = document.getElementById('modal-overlay');
+const modalClose = document.getElementById('modal-close');
+const modalContent = document.getElementById('modal-content');
+
+function clearElement(element) {
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+}
+
+function appendMessage(element, text, className = '') {
+    const container = document.createElement('div');
+    if (className) {
+        container.className = className;
+    }
+    container.style.padding = '20px';
+    container.style.textAlign = 'center';
+    container.textContent = text;
+    element.appendChild(container);
+}
 
 function updateStatus(connected) {
     if (connected === isConnected) return;
@@ -83,61 +105,116 @@ window.toggleInspection = async () => {
 };
 
 window.openRules = async () => {
-    document.getElementById('modal-title').textContent = "Rewrite Rules";
-    modalContent.innerHTML = '<div style="text-align:center; padding:20px;">Loading rules...</div>';
+    modalTitle.textContent = "Rewrite Rules";
+    clearElement(modalContent);
+    appendMessage(modalContent, 'Loading rules...');
     modalOverlay.classList.remove('hidden');
 
     const rules = await api.getRewrites();
+    clearElement(modalContent);
     if (!rules || rules.length === 0) {
-        modalContent.innerHTML = '<div style="padding:20px; text-align:center; color: var(--text-secondary)">No rewrite rules loaded</div>';
+        appendMessage(modalContent, 'No rewrite rules loaded');
         return;
     }
 
-    modalContent.innerHTML = rules.map(r => `
-        <div class="rule-item">
-            <div class="rule-header">
-                <span>${escapeHtml(r.name || 'Unnamed Rule')}</span>
-                <span style="color: ${r.enabled !== false ? 'var(--success)' : 'var(--text-secondary)'}">
-                    ${r.enabled !== false ? 'Enabled' : 'Disabled'}
-                </span>
-            </div>
-            <div class="rule-match">
-                Match: ${escapeHtml(JSON.stringify(r.match, null, 2))}
-            </div>
-            <div class="rule-actions">
-                Actions: ${escapeHtml(JSON.stringify(r.actions))}
-            </div>
-        </div>
-    `).join('');
+    const fragment = document.createDocumentFragment();
+    rules.forEach((rule) => {
+        const card = document.createElement('div');
+        card.className = 'rule-item';
+
+        const header = document.createElement('div');
+        header.className = 'rule-header';
+
+        const name = document.createElement('span');
+        name.textContent = rule && rule.name ? String(rule.name) : 'Unnamed Rule';
+        header.appendChild(name);
+
+        const enabled = document.createElement('span');
+        const active = rule && rule.enabled !== false;
+        enabled.style.color = active ? 'var(--success)' : 'var(--text-secondary)';
+        enabled.textContent = active ? 'Enabled' : 'Disabled';
+        header.appendChild(enabled);
+
+        const match = document.createElement('div');
+        match.className = 'rule-match';
+        match.textContent = `Match: ${JSON.stringify(rule && rule.match ? rule.match : {}, null, 2)}`;
+
+        const actions = document.createElement('div');
+        actions.className = 'rule-actions';
+        actions.textContent = `Actions: ${JSON.stringify(rule && rule.actions ? rule.actions : {})}`;
+
+        card.appendChild(header);
+        card.appendChild(match);
+        card.appendChild(actions);
+        fragment.appendChild(card);
+    });
+    modalContent.appendChild(fragment);
 };
 
 function renderTraffic(entries) {
-    const tbody = document.getElementById('traffic-body');
+    clearElement(trafficBody);
     if (!entries.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 20px; color: var(--text-secondary)">No traffic captured yet</td></tr>';
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6;
+        cell.style.textAlign = 'center';
+        cell.style.padding = '20px';
+        cell.style.color = 'var(--text-secondary)';
+        cell.textContent = 'No traffic captured yet';
+        row.appendChild(cell);
+        trafficBody.appendChild(row);
         return;
     }
 
-    tbody.innerHTML = entries.map(e => `
-        <tr onclick="openDetail(${e.id})">
-            <td style="color: var(--text-secondary); font-size: 0.85em;">
-                ${new Date(e.timestamp).toLocaleTimeString()}
-            </td>
-            <td><span class="method ${e.method}">${e.method || '?'}</span></td>
-            <td>${e.host}</td>
-            <td style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                ${e.url || '-'}
-            </td>
-            <td>${e.source_ip}</td>
-            <td>${e.status || '-'}</td>
-        </tr>
-    `).join('');
-}
+    const fragment = document.createDocumentFragment();
+    entries.forEach((entry) => {
+        const row = document.createElement('tr');
+        const id = Number.parseInt(String(entry && entry.id), 10);
+        if (Number.isFinite(id) && id > 0) {
+            row.addEventListener('click', () => {
+                void window.openDetail(id);
+            });
+        }
 
-// Modal Logic
-const modalOverlay = document.getElementById('modal-overlay');
-const modalClose = document.getElementById('modal-close');
-const modalContent = document.getElementById('modal-content');
+        const timestampCell = document.createElement('td');
+        timestampCell.style.color = 'var(--text-secondary)';
+        timestampCell.style.fontSize = '0.85em';
+        timestampCell.textContent = new Date(entry.timestamp).toLocaleTimeString();
+        row.appendChild(timestampCell);
+
+        const methodCell = document.createElement('td');
+        const methodSpan = document.createElement('span');
+        const method = String(entry && entry.method ? entry.method : '?');
+        const methodClass = method.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+        methodSpan.className = methodClass ? `method ${methodClass}` : 'method';
+        methodSpan.textContent = method;
+        methodCell.appendChild(methodSpan);
+        row.appendChild(methodCell);
+
+        const hostCell = document.createElement('td');
+        hostCell.textContent = String(entry && entry.host ? entry.host : '-');
+        row.appendChild(hostCell);
+
+        const urlCell = document.createElement('td');
+        urlCell.style.maxWidth = '300px';
+        urlCell.style.whiteSpace = 'nowrap';
+        urlCell.style.overflow = 'hidden';
+        urlCell.style.textOverflow = 'ellipsis';
+        urlCell.textContent = String(entry && entry.url ? entry.url : '-');
+        row.appendChild(urlCell);
+
+        const sourceCell = document.createElement('td');
+        sourceCell.textContent = String(entry && entry.source_ip ? entry.source_ip : '-');
+        row.appendChild(sourceCell);
+
+        const statusCell = document.createElement('td');
+        statusCell.textContent = String(entry && entry.status ? entry.status : '-');
+        row.appendChild(statusCell);
+
+        fragment.appendChild(row);
+    });
+    trafficBody.appendChild(fragment);
+}
 
 modalClose.onclick = () => {
     modalOverlay.classList.add('hidden');
@@ -148,38 +225,43 @@ modalOverlay.onclick = (e) => {
 };
 
 window.openDetail = async (id) => {
-    document.getElementById('modal-title').textContent = "Traffic Details";
-    modalContent.innerHTML = '<div style="text-align:center; padding:20px;">Loading details...</div>';
+    modalTitle.textContent = "Traffic Details";
+    clearElement(modalContent);
+    appendMessage(modalContent, 'Loading details...');
     modalOverlay.classList.remove('hidden');
 
     const data = await api.getDetail(id);
+    clearElement(modalContent);
     if (!data) {
-        modalContent.innerHTML = '<div style="color:var(--error); text-align:center;">Failed to load details</div>';
+        const error = document.createElement('div');
+        error.style.color = 'var(--error)';
+        error.style.textAlign = 'center';
+        error.textContent = 'Failed to load details';
+        modalContent.appendChild(error);
         return;
     }
 
-    modalContent.innerHTML = `
-        <div class="detail-section">
-            <h3>Request</h3>
-            <pre>${escapeHtml(data.request_full)}\n\n${escapeHtml(data.request_body)}</pre>
-        </div>
-        <div class="detail-section">
-            <h3>Response</h3>
-            <pre>${escapeHtml(data.response_full)}\n\n${escapeHtml(data.response_body)}</pre>
-        </div>
-    `;
-};
+    const requestSection = document.createElement('div');
+    requestSection.className = 'detail-section';
+    const requestTitle = document.createElement('h3');
+    requestTitle.textContent = 'Request';
+    const requestBody = document.createElement('pre');
+    requestBody.textContent = `${data.request_full || ''}\n\n${data.request_body || ''}`;
+    requestSection.appendChild(requestTitle);
+    requestSection.appendChild(requestBody);
 
-function escapeHtml(text) {
-    if (text === undefined || text === null) return '';
-    if (typeof text !== 'string') text = JSON.stringify(text, null, 2);
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
+    const responseSection = document.createElement('div');
+    responseSection.className = 'detail-section';
+    const responseTitle = document.createElement('h3');
+    responseTitle.textContent = 'Response';
+    const responseBody = document.createElement('pre');
+    responseBody.textContent = `${data.response_full || ''}\n\n${data.response_body || ''}`;
+    responseSection.appendChild(responseTitle);
+    responseSection.appendChild(responseBody);
+
+    modalContent.appendChild(requestSection);
+    modalContent.appendChild(responseSection);
+};
 
 let lastPoll = 0;
 async function loop() {

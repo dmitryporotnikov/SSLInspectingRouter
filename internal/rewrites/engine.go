@@ -263,7 +263,10 @@ func loadAndCompileRules(dir string) ([]compiledRule, []Rule, error) {
 	var out []compiledRule
 	var rawOut []Rule
 	for _, name := range fileNames {
-		path := filepath.Join(dir, name)
+		path, err := safeRuleFilePath(dir, name)
+		if err != nil {
+			return nil, nil, err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, nil, err

@@ -143,11 +143,15 @@ func (m *Manager) LoadConfig() (string, string, error) {
 		return "", "", os.ErrNotExist
 	}
 
-	data, err := os.ReadFile(path)
+	safePath, err := safeWireGuardConfigPath(m.dir, path)
+	if err != nil {
+		return "", "", err
+	}
+	data, err := os.ReadFile(safePath)
 	if err != nil {
 		return "", "", fmt.Errorf("read wireguard config: %w", err)
 	}
-	return path, string(data), nil
+	return safePath, string(data), nil
 }
 
 // Status returns current tunnel and config state.
@@ -301,8 +305,12 @@ func (m *Manager) statusLocked() (Status, error) {
 }
 
 func (m *Manager) resolveConfigPathLocked() (string, bool, error) {
-	if fileExists(m.preferred) {
-		return m.preferred, true, nil
+	preferredPath, err := safeWireGuardConfigPath(m.dir, m.preferred)
+	if err != nil {
+		return "", false, err
+	}
+	if fileExists(preferredPath) {
+		return preferredPath, true, nil
 	}
 
 	entries, err := os.ReadDir(m.dir)
@@ -322,7 +330,11 @@ func (m *Manager) resolveConfigPathLocked() (string, bool, error) {
 		if !strings.EqualFold(filepath.Ext(name), ".conf") {
 			continue
 		}
-		candidates = append(candidates, filepath.Join(m.dir, name))
+		path, err := safeWireGuardConfigPath(m.dir, name)
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, path)
 	}
 	if len(candidates) == 0 {
 		return "", false, nil
@@ -371,4 +383,33 @@ func interfaceFromConfigPath(path string) string {
 		return ""
 	}
 	return iface
+}
+
+func safeWireGuardConfigPath(dir, candidate string) (string, error) {
+	trimmedDir := strings.TrimSpace(dir)
+	if trimmedDir == "" {
+		return "", errors.New("wireguard directory is empty")
+	}
+	baseDir := filepath.Clean(trimmedDir)
+
+	name := strings.TrimSpace(filepath.Base(candidate))
+	if name == "" || name == "." {
+		return "", errors.New("wireguard config filename is empty")
+	}
+	if filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("invalid wireguard config filename %q", candidate)
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".conf") {
+		return "", fmt.Errorf("invalid wireguard config extension %q", candidate)
+	}
+
+	path := filepath.Join(baseDir, name)
+	rel, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("wireguard config escapes configured directory: %q", candidate)
+	}
+	return path, nil
 }

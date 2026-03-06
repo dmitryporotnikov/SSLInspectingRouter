@@ -37,7 +37,6 @@ const state = {
     section: "traffic",
 };
 
-const AUTH_TOKEN_KEY = "sir_auth_token";
 const THEME_KEY = "sir_theme";
 const CONNECTION_FAILURE_THRESHOLD = 3;
 const CONNECTION_STALE_AFTER_MS = 10000;
@@ -171,6 +170,34 @@ function escapeHTML(value) {
         .replace(/'/g, "&#39;");
 }
 
+function clearElement(element) {
+    if (!element) return;
+    while (element.firstChild) {
+        element.removeChild(element.firstChild);
+    }
+}
+
+function appendEmptyTableRow(tbody, colSpan, message) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = colSpan;
+    cell.className = "muted";
+    cell.textContent = message;
+    row.appendChild(cell);
+    tbody.appendChild(row);
+}
+
+function normalizeClassToken(value, fallback) {
+    const normalized = String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "");
+    if (normalized !== "") {
+        return normalized;
+    }
+    return fallback;
+}
+
 function formatBytes(bytes) {
     const value = Number(bytes || 0);
     if (!Number.isFinite(value) || value <= 0) {
@@ -260,29 +287,9 @@ function toggleTheme() {
     persistTheme(next);
 }
 
-function loadStoredAuthToken() {
-    try {
-        const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
-        if (typeof token === "string" && token.trim() !== "") {
-            return token.trim();
-        }
-    } catch (_error) {
-        // Ignore storage errors and fall back to cookie-only auth.
-    }
-    return null;
-}
-
 function persistAuthToken(token) {
+    // Keep bearer token in-memory only. Session persistence is handled by HttpOnly cookie auth.
     state.authToken = token && token.trim() !== "" ? token.trim() : null;
-    try {
-        if (state.authToken) {
-            window.localStorage.setItem(AUTH_TOKEN_KEY, state.authToken);
-        } else {
-            window.localStorage.removeItem(AUTH_TOKEN_KEY);
-        }
-    } catch (_error) {
-        // Ignore storage errors and keep token in-memory for current tab.
-    }
 }
 
 async function apiRequest(path, options = {}) {
@@ -392,7 +399,6 @@ function switchSection(section) {
 async function bootstrap() {
     initializeTheme();
     bindEvents();
-    persistAuthToken(loadStoredAuthToken());
 
     try {
         const me = await apiRequest("/api/v1/auth/me", { allowUnauthorized: true, trackConnectivity: false });
@@ -1179,31 +1185,57 @@ function rewriteMatchSummary(rule) {
 }
 
 function renderRewriteList() {
+    clearElement(dom.rewriteList);
     if (!state.rewrites.items.length) {
-        dom.rewriteList.innerHTML = `<p class="muted rewrite-empty">No rewrite rules loaded.</p>`;
+        const empty = document.createElement("p");
+        empty.className = "muted rewrite-empty";
+        empty.textContent = "No rewrite rules loaded.";
+        dom.rewriteList.appendChild(empty);
         return;
     }
 
-    dom.rewriteList.innerHTML = state.rewrites.items
-        .map((item) => {
-            const selected = item.key === state.rewrites.selectedKey ? " active" : "";
-            const rule = item.rule || {};
-            const enabled = rule.enabled === false ? "disabled" : "enabled";
-            const scopeLabel = item.managed ? "Managed" : "External";
-            const actionCount = rewriteActionCount(rule);
-            const title = rule.name || `${item.file}#${item.index}`;
-            return `
-                <button type="button" class="rewrite-list-item${selected}" data-rewrite-key="${escapeHTML(item.key)}">
-                    <div class="rewrite-list-top">
-                        <strong title="${escapeHTML(title)}">${escapeHTML(title)}</strong>
-                        <span class="rewrite-badge ${item.managed ? "managed" : "external"}">${escapeHTML(scopeLabel)}</span>
-                    </div>
-                    <div class="rewrite-list-meta">${escapeHTML(rewriteMatchSummary(rule))}</div>
-                    <div class="rewrite-list-meta">${escapeHTML(enabled)} • ${actionCount} action${actionCount === 1 ? "" : "s"}</div>
-                </button>
-            `;
-        })
-        .join("");
+    const fragment = document.createDocumentFragment();
+    state.rewrites.items.forEach((item) => {
+        const selected = item.key === state.rewrites.selectedKey;
+        const rule = item.rule || {};
+        const enabled = rule.enabled === false ? "disabled" : "enabled";
+        const scopeLabel = item.managed ? "Managed" : "External";
+        const actionCount = rewriteActionCount(rule);
+        const title = rule.name || `${item.file}#${item.index}`;
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = selected ? "rewrite-list-item active" : "rewrite-list-item";
+        button.dataset.rewriteKey = String(item.key || "");
+
+        const top = document.createElement("div");
+        top.className = "rewrite-list-top";
+
+        const strong = document.createElement("strong");
+        strong.title = title;
+        strong.textContent = title;
+        top.appendChild(strong);
+
+        const badge = document.createElement("span");
+        badge.className = item.managed ? "rewrite-badge managed" : "rewrite-badge external";
+        badge.textContent = scopeLabel;
+        top.appendChild(badge);
+
+        const matchMeta = document.createElement("div");
+        matchMeta.className = "rewrite-list-meta";
+        matchMeta.textContent = rewriteMatchSummary(rule);
+
+        const actionMeta = document.createElement("div");
+        actionMeta.className = "rewrite-list-meta";
+        actionMeta.textContent = `${enabled} • ${actionCount} action${actionCount === 1 ? "" : "s"}`;
+
+        button.appendChild(top);
+        button.appendChild(matchMeta);
+        button.appendChild(actionMeta);
+        fragment.appendChild(button);
+    });
+
+    dom.rewriteList.appendChild(fragment);
 }
 
 function setRewriteFormLocked(locked) {
@@ -1635,26 +1667,58 @@ async function loadTraffic() {
 
 function renderTraffic() {
     const items = state.traffic.items;
+    clearElement(dom.trafficBody);
     if (!items.length) {
-        dom.trafficBody.innerHTML = `<tr><td colspan="7" class="muted">No captured traffic for this query.</td></tr>`;
+        appendEmptyTableRow(dom.trafficBody, 7, "No captured traffic for this query.");
     } else {
-        dom.trafficBody.innerHTML = items
-            .map((entry) => {
-                const mode = String(entry.mode || "inspected").toLowerCase();
-                const modeClass = `mode-${mode}`;
-                return `
-                <tr class="row-clickable" data-id="${entry.id}">
-                    <td>${escapeHTML(formatTime(entry.timestamp))}</td>
-                    <td><span class="mode-pill ${escapeHTML(modeClass)}">${escapeHTML(mode)}</span></td>
-                    <td>${escapeHTML(entry.method || "-")}</td>
-                    <td class="host-cell" title="${escapeHTML(entry.host || "-")}">${escapeHTML(entry.host || "-")}</td>
-                    <td class="url-cell" title="${escapeHTML(entry.url || "-")}">${escapeHTML(entry.url || "-")}</td>
-                    <td>${escapeHTML(entry.source_ip || "-")}</td>
-                    <td>${escapeHTML(entry.status || "-")}</td>
-                </tr>
-            `;
-            })
-            .join("");
+        const fragment = document.createDocumentFragment();
+        items.forEach((entry) => {
+            const row = document.createElement("tr");
+            row.className = "row-clickable";
+            row.dataset.id = String(Number.parseInt(String(entry.id), 10) || 0);
+
+            const timeCell = document.createElement("td");
+            timeCell.textContent = formatTime(entry.timestamp);
+            row.appendChild(timeCell);
+
+            const modeCell = document.createElement("td");
+            const mode = String(entry.mode || "inspected").toLowerCase();
+            const modeToken = normalizeClassToken(mode, "inspected");
+            const modePill = document.createElement("span");
+            modePill.className = `mode-pill mode-${modeToken}`;
+            modePill.textContent = mode;
+            modeCell.appendChild(modePill);
+            row.appendChild(modeCell);
+
+            const methodCell = document.createElement("td");
+            methodCell.textContent = String(entry.method || "-");
+            row.appendChild(methodCell);
+
+            const hostCell = document.createElement("td");
+            const host = String(entry.host || "-");
+            hostCell.className = "host-cell";
+            hostCell.title = host;
+            hostCell.textContent = host;
+            row.appendChild(hostCell);
+
+            const urlCell = document.createElement("td");
+            const url = String(entry.url || "-");
+            urlCell.className = "url-cell";
+            urlCell.title = url;
+            urlCell.textContent = url;
+            row.appendChild(urlCell);
+
+            const sourceCell = document.createElement("td");
+            sourceCell.textContent = String(entry.source_ip || "-");
+            row.appendChild(sourceCell);
+
+            const statusCell = document.createElement("td");
+            statusCell.textContent = String(entry.status || "-");
+            row.appendChild(statusCell);
+
+            fragment.appendChild(row);
+        });
+        dom.trafficBody.appendChild(fragment);
     }
 
     const start = state.traffic.total === 0 ? 0 : state.traffic.offset + 1;
@@ -1668,23 +1732,41 @@ function renderTraffic() {
 async function showTrafficDetail(id) {
     try {
         const detail = await apiRequest(`/api/v1/traffic/${id}`);
-        openModal(
-            `Traffic #${id}`,
-            `
-            <h5>Request</h5>
-            <pre>${escapeHTML(detail.request_full || "")}${detail.request_body ? "\n\n" + escapeHTML(detail.request_body) : ""}</pre>
-            <h5>Response</h5>
-            <pre>${escapeHTML(detail.response_full || "")}${detail.response_body ? "\n\n" + escapeHTML(detail.response_body) : ""}</pre>
-        `
-        );
+        const content = document.createDocumentFragment();
+
+        const requestTitle = document.createElement("h5");
+        requestTitle.textContent = "Request";
+        content.appendChild(requestTitle);
+
+        const requestPre = document.createElement("pre");
+        requestPre.textContent = `${detail.request_full || ""}${detail.request_body ? "\n\n" + detail.request_body : ""}`;
+        content.appendChild(requestPre);
+
+        const responseTitle = document.createElement("h5");
+        responseTitle.textContent = "Response";
+        content.appendChild(responseTitle);
+
+        const responsePre = document.createElement("pre");
+        responsePre.textContent = `${detail.response_full || ""}${detail.response_body ? "\n\n" + detail.response_body : ""}`;
+        content.appendChild(responsePre);
+
+        openModal(`Traffic #${id}`, content);
     } catch (error) {
-        openModal("Traffic Detail", `<p class="form-error">${escapeHTML(error.message)}</p>`);
+        const errorNode = document.createElement("p");
+        errorNode.className = "form-error";
+        errorNode.textContent = error.message;
+        openModal("Traffic Detail", errorNode);
     }
 }
 
-function openModal(title, html) {
+function openModal(title, content) {
     dom.modalTitle.textContent = title;
-    dom.modalContent.innerHTML = html;
+    clearElement(dom.modalContent);
+    if (content instanceof Node) {
+        dom.modalContent.appendChild(content);
+    } else if (content !== null && content !== undefined) {
+        dom.modalContent.textContent = String(content);
+    }
     dom.modal.classList.remove("hidden");
 }
 
@@ -1707,31 +1789,65 @@ async function loadUsers() {
 }
 
 function renderUsers() {
+    clearElement(dom.usersBody);
     if (!state.users.length) {
-        dom.usersBody.innerHTML = `<tr><td colspan="6" class="muted">No users available.</td></tr>`;
+        appendEmptyTableRow(dom.usersBody, 6, "No users available.");
         return;
     }
 
-    dom.usersBody.innerHTML = state.users
-        .map((user) => {
-            const stateLabel = user.is_active ? "Active" : "Disabled";
-            return `
-            <tr>
-                <td>${escapeHTML(user.username)}</td>
-                <td>${escapeHTML(user.display_name)}</td>
-                <td>${escapeHTML(user.role)}</td>
-                <td>${escapeHTML(stateLabel)}</td>
-                <td>${escapeHTML(user.last_login_at ? formatTime(user.last_login_at) : "Never")}</td>
-                <td>
-                    <div class="user-actions">
-                        <button type="button" class="btn btn-ghost" data-action="edit" data-id="${user.id}">Edit</button>
-                        <button type="button" class="btn btn-ghost" data-action="delete" data-id="${user.id}">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `;
-        })
-        .join("");
+    const fragment = document.createDocumentFragment();
+    state.users.forEach((user) => {
+        const row = document.createElement("tr");
+        const stateLabel = user.is_active ? "Active" : "Disabled";
+
+        const usernameCell = document.createElement("td");
+        usernameCell.textContent = String(user.username || "");
+        row.appendChild(usernameCell);
+
+        const displayNameCell = document.createElement("td");
+        displayNameCell.textContent = String(user.display_name || "");
+        row.appendChild(displayNameCell);
+
+        const roleCell = document.createElement("td");
+        roleCell.textContent = String(user.role || "");
+        row.appendChild(roleCell);
+
+        const stateCell = document.createElement("td");
+        stateCell.textContent = stateLabel;
+        row.appendChild(stateCell);
+
+        const lastLoginCell = document.createElement("td");
+        lastLoginCell.textContent = user.last_login_at ? formatTime(user.last_login_at) : "Never";
+        row.appendChild(lastLoginCell);
+
+        const actionsCell = document.createElement("td");
+        const actionsWrap = document.createElement("div");
+        actionsWrap.className = "user-actions";
+
+        const userID = String(Number.parseInt(String(user.id), 10) || 0);
+
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "btn btn-ghost";
+        editButton.dataset.action = "edit";
+        editButton.dataset.id = userID;
+        editButton.textContent = "Edit";
+        actionsWrap.appendChild(editButton);
+
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "btn btn-ghost";
+        deleteButton.dataset.action = "delete";
+        deleteButton.dataset.id = userID;
+        deleteButton.textContent = "Delete";
+        actionsWrap.appendChild(deleteButton);
+
+        actionsCell.appendChild(actionsWrap);
+        row.appendChild(actionsCell);
+
+        fragment.appendChild(row);
+    });
+    dom.usersBody.appendChild(fragment);
 }
 
 function beginEditUser(userID) {
