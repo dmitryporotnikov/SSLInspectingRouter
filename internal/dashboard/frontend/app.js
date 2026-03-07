@@ -66,10 +66,14 @@ const dom = {
     logNothingToggle: document.getElementById("log-nothing-toggle"),
     wireguardWrap: document.getElementById("wireguard-wrap"),
     wireguardToggle: document.getElementById("wireguard-toggle"),
+    torWrap: document.getElementById("tor-wrap"),
+    torToggle: document.getElementById("tor-toggle"),
     wireguardConfigInput: document.getElementById("wireguard-config-input"),
     wireguardConfigSave: document.getElementById("wireguard-config-save"),
     wireguardConfigStatus: document.getElementById("wireguard-config-status"),
     wireguardMetaValue: document.getElementById("wireguard-meta-value"),
+    torMetaValue: document.getElementById("tor-meta-value"),
+    torStatus: document.getElementById("tor-status"),
     bodyArtifactsWrap: document.getElementById("body-artifacts-wrap"),
     bodyArtifactsToggle: document.getElementById("body-artifacts-toggle"),
     bodyArtifactsPathWrap: document.getElementById("body-artifacts-path-wrap"),
@@ -378,6 +382,7 @@ function applyUserContext() {
     if (!admin && state.section === "users") {
         switchSection("traffic");
     }
+    syncEgressToggleAvailability();
     renderRewriteEditor();
 }
 
@@ -497,6 +502,9 @@ function bindEvents() {
     });
     dom.wireguardToggle.addEventListener("change", () => {
         void updateWireGuard(dom.wireguardToggle.checked);
+    });
+    dom.torToggle.addEventListener("change", () => {
+        void updateTor(dom.torToggle.checked);
     });
     dom.wireguardConfigSave.addEventListener("click", () => {
         void saveWireGuardConfig();
@@ -633,6 +641,7 @@ async function handleLogout() {
 
 function handleSessionExpired() {
     state.user = null;
+    state.status = null;
     persistAuthToken(null);
     state.users = [];
     state.traffic.items = [];
@@ -665,6 +674,10 @@ function handleSessionExpired() {
     dom.wireguardMetaValue.textContent = "inactive";
     dom.wireguardMetaValue.title = "inactive";
     dom.wireguardToggle.checked = false;
+    dom.torMetaValue.textContent = "inactive";
+    dom.torMetaValue.title = "inactive";
+    dom.torToggle.checked = false;
+    dom.torStatus.textContent = "";
     dom.allowQuicValue.textContent = "-";
     dom.tlsPortsValue.textContent = "default";
     dom.inspectOnlyValue.textContent = "all sources";
@@ -675,6 +688,7 @@ function handleSessionExpired() {
     dom.logNothingToggle.checked = false;
     dom.rewriteCount.textContent = "0";
     dom.rewriteManagedFile.textContent = "managed file: -";
+    syncEgressToggleAvailability();
     resetUserForm();
     resetRewriteForm();
     renderTraffic();
@@ -728,11 +742,15 @@ function applyStatus(status) {
     if (Number.isFinite(requestCount) && requestCount >= 0) {
         dom.metricRequests.textContent = requestCount.toLocaleString();
     }
+    const wireguardEnabled = !!status.wireguard_enabled;
+    const torEnabled = !!status.tor_enabled;
     dom.inspectionToggle.checked = !!status.inspection_enabled;
     dom.truncateLogToggle.checked = !!status.truncate_log_enabled;
     dom.logNothingToggle.checked = !!status.log_nothing_enabled;
-    dom.wireguardToggle.checked = !!status.wireguard_enabled;
+    dom.wireguardToggle.checked = wireguardEnabled;
+    dom.torToggle.checked = torEnabled;
     dom.bodyArtifactsToggle.checked = !!status.body_artifacts_enabled;
+    syncEgressToggleAvailability();
 
     const artifactsDir = String(status.body_artifacts_directory || "").trim();
     if (document.activeElement !== dom.bodyArtifactsDirectoryInput) {
@@ -777,7 +795,6 @@ function applyStatus(status) {
         dom.pcapPathValue.title = "disabled";
     }
 
-    const wireguardEnabled = !!status.wireguard_enabled;
     const wireguardInterface = String(status.wireguard_interface || "").trim();
     const wireguardConfigPresent = !!status.wireguard_config_present;
     const wireguardConfigPath = String(status.wireguard_config_path || "").trim();
@@ -791,6 +808,20 @@ function applyStatus(status) {
     dom.wireguardMetaValue.textContent = wireguardMeta;
     dom.wireguardMetaValue.title = wireguardConfigPath || wireguardMeta;
 
+    const torSOCKSAddress = String(status.tor_socks_address || "").trim();
+    const torReachable = !!status.tor_reachable;
+    const torLastError = String(status.tor_last_error || "").trim();
+    let torMeta = torEnabled ? "active" : "inactive";
+    if (torSOCKSAddress) {
+        torMeta += ` (${torSOCKSAddress})`;
+    }
+    if (torEnabled && !torReachable) {
+        torMeta += " | offline";
+    }
+    dom.torMetaValue.textContent = torMeta;
+    dom.torMetaValue.title = torMeta;
+    dom.torStatus.textContent = torLastError;
+
     const egressInterface = String(status.egress_interface || "").trim();
     dom.egressInterfaceValue.textContent = egressInterface || "-";
     dom.egressInterfaceValue.title = egressInterface || "-";
@@ -798,6 +829,15 @@ function applyStatus(status) {
     const defaultEgressInterface = String(status.default_egress_interface || "").trim();
     dom.defaultEgressInterfaceValue.textContent = defaultEgressInterface || "-";
     dom.defaultEgressInterfaceValue.title = defaultEgressInterface || "-";
+}
+
+function syncEgressToggleAvailability() {
+    const wireguardEnabled = !!(state.status && state.status.wireguard_enabled);
+    const torEnabled = !!(state.status && state.status.tor_enabled);
+    const admin = isAdmin();
+
+    dom.wireguardToggle.disabled = !admin || (torEnabled && !wireguardEnabled);
+    dom.torToggle.disabled = !admin || (wireguardEnabled && !torEnabled);
 }
 
 function parsePolicyEntries(value) {
@@ -896,6 +936,13 @@ async function updateWireGuard(enabled) {
     if (!isAdmin()) {
         return;
     }
+    if (enabled && state.status && state.status.tor_enabled) {
+        dom.wireguardToggle.checked = false;
+        dom.wireguardConfigStatus.textContent = "Disable Tor egress before enabling WireGuard.";
+        alert("Disable Tor egress before enabling WireGuard.");
+        syncEgressToggleAvailability();
+        return;
+    }
 
     dom.wireguardConfigStatus.textContent = enabled ? "Enabling tunnel..." : "Disabling tunnel...";
     dom.wireguardToggle.disabled = true;
@@ -908,7 +955,34 @@ async function updateWireGuard(enabled) {
         dom.wireguardConfigStatus.textContent = "";
         alert(error.message);
     } finally {
-        dom.wireguardToggle.disabled = false;
+        syncEgressToggleAvailability();
+    }
+}
+
+async function updateTor(enabled) {
+    if (!isAdmin()) {
+        return;
+    }
+    if (enabled && state.status && state.status.wireguard_enabled) {
+        dom.torToggle.checked = false;
+        dom.torStatus.textContent = "Disable WireGuard egress before enabling Tor.";
+        alert("Disable WireGuard egress before enabling Tor.");
+        syncEgressToggleAvailability();
+        return;
+    }
+
+    dom.torStatus.textContent = enabled ? "Enabling Tor egress..." : "Disabling Tor egress...";
+    dom.torToggle.disabled = true;
+
+    try {
+        await updateDashboardSettings({ tor_enabled: enabled });
+        dom.torStatus.textContent = enabled ? "Tor egress enabled." : "Tor egress disabled.";
+    } catch (error) {
+        dom.torToggle.checked = !enabled;
+        dom.torStatus.textContent = "";
+        alert(error.message);
+    } finally {
+        syncEgressToggleAvailability();
     }
 }
 

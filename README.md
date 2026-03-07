@@ -32,7 +32,12 @@ This repository contains a transparent interception proxy written in Go for HTTP
                                       Export PCAP File
 ```
 
-Optional egress mode: `SSLInspectingRouter -> WireGuard tunnel -> Internet`.
+Optional egress modes:
+
+* `SSLInspectingRouter -> WireGuard tunnel -> Internet`
+* `SSLInspectingRouter -> Tor SOCKS5 -> Internet`
+
+WireGuard and Tor egress are runtime-toggleable from the dashboard, but they are **mutually exclusive** (only one can be enabled at a time).
 
 The application operates by manipulating `iptables` in both `nat` and `filter` tables.
 It creates custom chains (`SSLPROXY`, `SSL_DISPATCH`) linked to `PREROUTING` and optional `OUTPUT` hooks to manage transparent redirection:
@@ -56,6 +61,7 @@ Client -> SSLInspectingRouter -> WireGuard tunnel -> Internet
 ```
 
 This is controlled at runtime from the Web Dashboard Control Center.
+As an alternative, upstream proxy egress can be routed through Tor SOCKS5 from the same Control Center.
 
 ### SSL/TLS Interception
 For encrypted traffic, the proxy acts as a Certificate Authority (CA). It dynamically generates certificates for each host on demand (`cert.go`).
@@ -65,11 +71,21 @@ For encrypted traffic, the proxy acts as a Certificate Authority (CA). It dynami
 
 A setup script is provided to automate environment configuration. It enables IPv4 forwarding using `sysctl` and checks for required userspace tools.
 
+Primary validation/testing environment:
+
+```text
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=24.04
+DISTRIB_CODENAME=noble
+DISTRIB_DESCRIPTION="Ubuntu 24.04.3 LTS"
+```
+
 Common dependencies on Debian/Ubuntu:
 
 * `iptables`
 * `iproute2` (provides `ip`)
 * `wireguard-tools` (provides `wg-quick`; needed for WireGuard egress mode)
+* `tor` (needed for Tor egress mode; default SOCKS endpoint `127.0.0.1:9050`)
 * Go compiler (`golang`)
 
 To build the project:
@@ -136,6 +152,7 @@ Optional environment variables for path overrides:
 
 * `SSLINSPECTINGROUTER_REWRITES_DIR`
 * `SSLINSPECTINGROUTER_WIREGUARD_DIR`
+* `SSLINSPECTINGROUTER_TOR_SOCKS_ADDR` (optional override for Tor SOCKS endpoint)
 
 **Example: Blocking specific domains**
 
@@ -188,6 +205,29 @@ Notes:
 
 * The Web UI config save writes to `wireguard/wg0.conf`.
 * WireGuard egress control requires `wg-quick` and `ip` binaries available on the host.
+* WireGuard and Tor egress toggles are mutually exclusive.
+
+### Tor Egress (Web UI Runtime Toggle)
+
+Use this when you want proxy upstream traffic (HTTP + HTTPS, including bypass/inspection-paused tunnels) to exit via Tor.
+
+1. Install and run Tor on the router host (default local SOCKS endpoint is `127.0.0.1:9050`).
+2. Start the router with dashboard enabled:
+
+```bash
+sudo ./sslinspectingrouter -web :3000
+```
+
+3. Open the dashboard as admin.
+4. Enable `Tor Egress` toggle.
+
+When enabled, upstream requests are routed through Tor SOCKS5. Disable the toggle to restore direct upstream routing.
+
+Notes:
+
+* Default SOCKS endpoint is `127.0.0.1:9050`.
+* Override SOCKS endpoint with `SSLINSPECTINGROUTER_TOR_SOCKS_ADDR`.
+* Tor and WireGuard egress toggles are mutually exclusive.
 
 ### Shutdown
 
@@ -251,6 +291,9 @@ Authenticated endpoints:
 * `body_artifacts_directory` (string, optional; can also be changed from the dashboard Body Artifacts path control)
 * `wireguard_enabled` (bool)
 * `wireguard_config` (string; WireGuard client config content)
+* `tor_enabled` (bool)
+
+WireGuard and Tor egress are mutually exclusive: API requests that attempt to enable both at once are rejected.
 
 `GET /api/v1/status` returns runtime status for the dashboard, including:
 
@@ -270,6 +313,10 @@ Authenticated endpoints:
 * `wireguard_interface` (string)
 * `wireguard_config_present` (bool)
 * `wireguard_config_path` (string)
+* `tor_enabled` (bool)
+* `tor_socks_address` (string)
+* `tor_reachable` (bool)
+* `tor_last_error` (string)
 * `egress_interface` (string)
 * `default_egress_interface` (string)
 

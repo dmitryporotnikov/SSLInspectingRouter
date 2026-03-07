@@ -2,7 +2,7 @@
   "rules": [
     {
       "name": "test",
-      "enabled": true,
+      "enabled": false,
       "match": {
         "content_type_regex": "text/(plain|html)"
       },

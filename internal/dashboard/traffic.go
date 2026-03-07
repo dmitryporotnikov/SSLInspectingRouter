@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tor"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
+
+var errMutuallyExclusiveEgress = errors.New("wireguard and tor egress cannot be enabled at the same time")
 
 // TrafficEntry is a summarized view of captured traffic rows.
 type TrafficEntry struct {
@@ -250,6 +253,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			LogNothingEnabled         *bool   `json:"log_nothing_enabled"`
 			WireGuardEnabled          *bool   `json:"wireguard_enabled"`
 			WireGuardConfigRaw        *string `json:"wireguard_config"`
+			TorEnabled                *bool   `json:"tor_enabled"`
 		}
 		if err := decodeJSONBody(r, &payload); err != nil {
 			writeJSONError(w, http.StatusBadRequest, "invalid JSON payload")
@@ -262,7 +266,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			payload.TruncateLogEnabled == nil &&
 			payload.LogNothingEnabled == nil &&
 			payload.WireGuardEnabled == nil &&
-			payload.WireGuardConfigRaw == nil {
+			payload.WireGuardConfigRaw == nil &&
+			payload.TorEnabled == nil {
 			writeJSONError(w, http.StatusBadRequest, "at least one setting field is required")
 			return
 		}
@@ -306,10 +311,49 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if payload.WireGuardEnabled != nil {
-			if err := s.applyWireGuardState(*payload.WireGuardEnabled); err != nil {
+		if payload.WireGuardEnabled != nil && payload.TorEnabled != nil && *payload.WireGuardEnabled && *payload.TorEnabled {
+			writeJSONError(w, http.StatusBadRequest, errMutuallyExclusiveEgress.Error())
+			return
+		}
+
+		if payload.WireGuardEnabled != nil && !*payload.WireGuardEnabled {
+			if err := s.applyWireGuardState(false); err != nil {
 				statusCode := http.StatusInternalServerError
-				if errors.Is(err, wireguard.ErrConfigNotFound) || errors.Is(err, wireguard.ErrConfigEmpty) {
+				if errors.Is(err, wireguard.ErrConfigNotFound) ||
+					errors.Is(err, wireguard.ErrConfigEmpty) ||
+					errors.Is(err, errMutuallyExclusiveEgress) {
+					statusCode = http.StatusBadRequest
+				}
+				writeJSONError(w, statusCode, err.Error())
+				return
+			}
+		}
+		if payload.TorEnabled != nil && !*payload.TorEnabled {
+			if err := s.applyTorState(false); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, tor.ErrSOCKSUnavailable) || errors.Is(err, errMutuallyExclusiveEgress) {
+					statusCode = http.StatusBadRequest
+				}
+				writeJSONError(w, statusCode, err.Error())
+				return
+			}
+		}
+		if payload.WireGuardEnabled != nil && *payload.WireGuardEnabled {
+			if err := s.applyWireGuardState(true); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, wireguard.ErrConfigNotFound) ||
+					errors.Is(err, wireguard.ErrConfigEmpty) ||
+					errors.Is(err, errMutuallyExclusiveEgress) {
+					statusCode = http.StatusBadRequest
+				}
+				writeJSONError(w, statusCode, err.Error())
+				return
+			}
+		}
+		if payload.TorEnabled != nil && *payload.TorEnabled {
+			if err := s.applyTorState(true); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, tor.ErrSOCKSUnavailable) || errors.Is(err, errMutuallyExclusiveEgress) {
 					statusCode = http.StatusBadRequest
 				}
 				writeJSONError(w, statusCode, err.Error())
@@ -353,6 +397,10 @@ func (s *Server) currentStatusPayload() map[string]any {
 	wireGuardInterface := ""
 	wireGuardConfigPresent := false
 	wireGuardConfigPath := ""
+	torEnabled := false
+	torSOCKSAddress := ""
+	torReachable := false
+	torLastError := ""
 	if s.wireguardRuntime != nil {
 		wireGuardStatus, err := s.wireguardRuntime.Status()
 		if err != nil {
@@ -362,6 +410,17 @@ func (s *Server) currentStatusPayload() map[string]any {
 			wireGuardInterface = wireGuardStatus.Interface
 			wireGuardConfigPresent = wireGuardStatus.ConfigPresent
 			wireGuardConfigPath = wireGuardStatus.ConfigPath
+		}
+	}
+	if s.torRuntime != nil {
+		torStatus, err := s.torRuntime.Status()
+		if err != nil {
+			logger.LogDebug(fmt.Sprintf("dashboard status tor query failed: %v", err))
+		} else {
+			torEnabled = torStatus.Enabled
+			torSOCKSAddress = torStatus.SOCKSAddress
+			torReachable = torStatus.Reachable
+			torLastError = torStatus.LastError
 		}
 	}
 	egressInterface := ""
@@ -390,6 +449,10 @@ func (s *Server) currentStatusPayload() map[string]any {
 		"wireguard_interface":      wireGuardInterface,
 		"wireguard_config_present": wireGuardConfigPresent,
 		"wireguard_config_path":    wireGuardConfigPath,
+		"tor_enabled":              torEnabled,
+		"tor_socks_address":        torSOCKSAddress,
+		"tor_reachable":            torReachable,
+		"tor_last_error":           torLastError,
 		"egress_interface":         egressInterface,
 		"default_egress_interface": defaultEgressInterface,
 	}
@@ -401,6 +464,14 @@ func (s *Server) applyWireGuardState(enabled bool) error {
 	}
 
 	if enabled {
+		torEnabled, err := s.isTorEnabled()
+		if err != nil {
+			return err
+		}
+		if torEnabled {
+			return fmt.Errorf("%w: disable tor egress before enabling wireguard", errMutuallyExclusiveEgress)
+		}
+
 		status, err := s.wireguardRuntime.Enable()
 		if err != nil {
 			return err
@@ -437,6 +508,79 @@ func (s *Server) applyWireGuardState(enabled bool) error {
 		return fmt.Errorf("wireguard disabled but failed to restore egress interface: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) applyTorState(enabled bool) error {
+	if s.torRuntime == nil {
+		return fmt.Errorf("tor runtime unavailable")
+	}
+
+	if enabled {
+		wireGuardEnabled, err := s.isWireGuardEnabled()
+		if err != nil {
+			return err
+		}
+		if wireGuardEnabled {
+			return fmt.Errorf("%w: disable wireguard egress before enabling tor", errMutuallyExclusiveEgress)
+		}
+
+		status, err := s.torRuntime.Enable()
+		if err != nil {
+			return err
+		}
+		if err := s.applyTorProxyRouting(true, status.SOCKSAddress); err != nil {
+			_, _ = s.torRuntime.Disable()
+			return fmt.Errorf("tor enabled but failed to switch proxy routing: %w", err)
+		}
+		return nil
+	}
+
+	if _, err := s.torRuntime.Disable(); err != nil {
+		return err
+	}
+	if err := s.applyTorProxyRouting(false, ""); err != nil {
+		return fmt.Errorf("tor disabled but failed to restore direct proxy routing: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) applyTorProxyRouting(enabled bool, socksAddress string) error {
+	if s.httpHandler != nil {
+		if err := s.httpHandler.SetSOCKSProxy(enabled, socksAddress); err != nil {
+			return err
+		}
+	}
+	if s.httpsHandler != nil {
+		if err := s.httpsHandler.SetSOCKSProxy(enabled, socksAddress); err != nil {
+			if s.httpHandler != nil {
+				_ = s.httpHandler.SetSOCKSProxy(false, "")
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Server) isWireGuardEnabled() (bool, error) {
+	if s.wireguardRuntime == nil {
+		return false, nil
+	}
+	status, err := s.wireguardRuntime.Status()
+	if err != nil {
+		return false, fmt.Errorf("failed to query wireguard status: %w", err)
+	}
+	return status.Enabled, nil
+}
+
+func (s *Server) isTorEnabled() (bool, error) {
+	if s.torRuntime == nil {
+		return false, nil
+	}
+	status, err := s.torRuntime.Status()
+	if err != nil {
+		return false, fmt.Errorf("failed to query tor status: %w", err)
+	}
+	return status.Enabled, nil
 }
 
 func parseRequestLine(requestLine string) (method, url string) {

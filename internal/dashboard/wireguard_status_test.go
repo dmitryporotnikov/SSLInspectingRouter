@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tor"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
 
@@ -74,6 +75,46 @@ type stubEgressRuntime struct {
 	defaultIF   string
 	setErr      error
 	switchCalls []string
+}
+
+type stubTorRuntime struct {
+	status     tor.Status
+	statusErr  error
+	enableErr  error
+	disableErr error
+
+	enableCalls  int
+	disableCalls int
+}
+
+func (s *stubTorRuntime) Status() (tor.Status, error) {
+	if s.statusErr != nil {
+		return tor.Status{}, s.statusErr
+	}
+	return s.status, nil
+}
+
+func (s *stubTorRuntime) Enable() (tor.Status, error) {
+	s.enableCalls++
+	if s.enableErr != nil {
+		return tor.Status{}, s.enableErr
+	}
+	s.status.Enabled = true
+	if s.status.SOCKSAddress == "" {
+		s.status.SOCKSAddress = "127.0.0.1:9050"
+	}
+	s.status.Reachable = true
+	return s.status, nil
+}
+
+func (s *stubTorRuntime) Disable() (tor.Status, error) {
+	s.disableCalls++
+	if s.disableErr != nil {
+		return tor.Status{}, s.disableErr
+	}
+	s.status.Enabled = false
+	s.status.Reachable = false
+	return s.status, nil
 }
 
 func (s *stubEgressRuntime) SetEgressInterface(iface string) error {
@@ -166,5 +207,200 @@ func TestHandleStatusWireGuardEnableWithoutConfigReturnsBadRequest(t *testing.T)
 	s.handleStatus(recorder, req)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleStatusTorToggle(t *testing.T) {
+	db := openDashboardTestDB(t)
+	s := &Server{
+		db: db,
+		torRuntime: &stubTorRuntime{
+			status: tor.Status{
+				SOCKSAddress: "127.0.0.1:9050",
+			},
+		},
+		now: time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"tor_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	torStub := s.torRuntime.(*stubTorRuntime)
+	if torStub.enableCalls != 1 {
+		t.Fatalf("enable calls = %d, want 1", torStub.enableCalls)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if enabled, _ := payload["tor_enabled"].(bool); !enabled {
+		t.Fatalf("tor_enabled = %v, want true", payload["tor_enabled"])
+	}
+	if got, _ := payload["tor_socks_address"].(string); got != "127.0.0.1:9050" {
+		t.Fatalf("tor_socks_address = %q, want %q", got, "127.0.0.1:9050")
+	}
+}
+
+func TestHandleStatusTorEnableUnavailableReturnsBadRequest(t *testing.T) {
+	db := openDashboardTestDB(t)
+	s := &Server{
+		db: db,
+		torRuntime: &stubTorRuntime{
+			enableErr: tor.ErrSOCKSUnavailable,
+		},
+		now: time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"tor_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleStatusRejectsEnablingBothWireGuardAndTor(t *testing.T) {
+	db := openDashboardTestDB(t)
+	s := &Server{
+		db:               db,
+		wireguardRuntime: &stubWireGuardRuntime{},
+		torRuntime:       &stubTorRuntime{},
+		now:              time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"wireguard_enabled":true,"tor_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleStatusRejectsWireGuardEnableWhileTorEnabled(t *testing.T) {
+	db := openDashboardTestDB(t)
+	wireguardStub := &stubWireGuardRuntime{}
+	torStub := &stubTorRuntime{
+		status: tor.Status{
+			Enabled:      true,
+			SOCKSAddress: "127.0.0.1:9050",
+			Reachable:    true,
+		},
+	}
+	s := &Server{
+		db:               db,
+		wireguardRuntime: wireguardStub,
+		torRuntime:       torStub,
+		now:              time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"wireguard_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if wireguardStub.enableCalls != 0 {
+		t.Fatalf("wireguard enable calls = %d, want 0", wireguardStub.enableCalls)
+	}
+}
+
+func TestHandleStatusRejectsTorEnableWhileWireGuardEnabled(t *testing.T) {
+	db := openDashboardTestDB(t)
+	torStub := &stubTorRuntime{}
+	wireguardStub := &stubWireGuardRuntime{
+		status: wireguard.Status{
+			Enabled:   true,
+			Interface: "wg0",
+		},
+	}
+	s := &Server{
+		db:               db,
+		wireguardRuntime: wireguardStub,
+		torRuntime:       torStub,
+		now:              time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"tor_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if torStub.enableCalls != 0 {
+		t.Fatalf("tor enable calls = %d, want 0", torStub.enableCalls)
+	}
+}
+
+func TestHandleStatusAllowsTorToWireGuardSwitchoverInOneRequest(t *testing.T) {
+	db := openDashboardTestDB(t)
+	wireguardStub := &stubWireGuardRuntime{
+		status: wireguard.Status{
+			Interface: "wg0",
+		},
+	}
+	torStub := &stubTorRuntime{
+		status: tor.Status{
+			Enabled:      true,
+			SOCKSAddress: "127.0.0.1:9050",
+			Reachable:    true,
+		},
+	}
+	s := &Server{
+		db:               db,
+		wireguardRuntime: wireguardStub,
+		torRuntime:       torStub,
+		egressRuntime: &stubEgressRuntime{
+			egress:    "eth0",
+			defaultIF: "eth0",
+		},
+		now: time.Now,
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/status", strings.NewReader(`{"tor_enabled":false,"wireguard_enabled":true}`))
+	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &DashboardUser{
+		ID:   1,
+		Role: "admin",
+	}))
+	recorder := httptest.NewRecorder()
+
+	s.handleStatus(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if torStub.disableCalls != 1 {
+		t.Fatalf("tor disable calls = %d, want 1", torStub.disableCalls)
+	}
+	if wireguardStub.enableCalls != 1 {
+		t.Fatalf("wireguard enable calls = %d, want 1", wireguardStub.enableCalls)
 	}
 }

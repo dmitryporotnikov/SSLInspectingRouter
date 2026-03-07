@@ -719,6 +719,10 @@ select:focus {
     font-size: 0.76rem;
 }
 
+#tor-status {
+    font-size: 0.76rem;
+}
+
 .rewrites-layout {
     display: grid;
     grid-template-columns: 320px minmax(0, 1fr);

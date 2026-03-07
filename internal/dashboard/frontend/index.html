@@ -105,6 +105,13 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        <div class="switch-wrap compact-switch" id="tor-wrap">
+                            <span>Tor Egress</span>
+                            <label class="switch">
+                                <input type="checkbox" id="tor-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                         <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
                             <span>Body Artifacts</span>
                             <label class="switch">
@@ -135,6 +142,16 @@
                         <span>Tunnel</span>
                         <strong id="wireguard-meta-value" class="meta-value">inactive</strong>
                     </div>
+                </details>
+
+                <details class="settings-fold" open>
+                    <summary>Tor Egress</summary>
+                    <p class="muted settings-note">Requires Tor SOCKS endpoint (default <code>127.0.0.1:9050</code>).</p>
+                    <div class="meta-row">
+                        <span>Tor Route</span>
+                        <strong id="tor-meta-value" class="meta-value">inactive</strong>
+                    </div>
+                    <span class="muted" id="tor-status"></span>
                 </details>
 
                 <details id="policy-controls" class="settings-fold policy-panel">

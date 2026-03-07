@@ -26,11 +26,15 @@ type HTTPSHandler struct {
 	certManager       *cert.CertManager
 	client            *http.Client
 	ipClient          *http.Client
+	torClient         *http.Client
+	torIPClient       *http.Client
+	torDialer         socksDialer
 	blockList         *blocklist.BlockList
 	bypassList        *blocklist.BlockList
 	rewriter          *rewrites.Engine
 	inspectionEnabled atomic.Bool
 	policyMu          sync.RWMutex
+	upstreamMu        sync.RWMutex
 }
 
 var errNoSNI = errors.New("no SNI found in ClientHello")
@@ -133,6 +137,71 @@ func (h *HTTPSHandler) currentBypassList() *blocklist.BlockList {
 	return h.bypassList
 }
 
+// SetSOCKSProxy enables or disables upstream routing via SOCKS5.
+func (h *HTTPSHandler) SetSOCKSProxy(enabled bool, socksAddr string) error {
+	h.upstreamMu.Lock()
+	defer h.upstreamMu.Unlock()
+
+	if !enabled {
+		h.torClient = nil
+		h.torIPClient = nil
+		h.torDialer = nil
+		return nil
+	}
+
+	transport, _, err := buildSOCKS5RoundTripper(h.client.Transport, socksAddr)
+	if err != nil {
+		return err
+	}
+	ipTransport, _, err := buildSOCKS5RoundTripper(h.ipClient.Transport, socksAddr)
+	if err != nil {
+		return err
+	}
+	dialer, _, err := buildSOCKS5Dialer(socksAddr, 10*time.Second)
+	if err != nil {
+		return err
+	}
+
+	clientCopy := *h.client
+	clientCopy.Transport = transport
+
+	ipClientCopy := *h.ipClient
+	ipClientCopy.Transport = ipTransport
+
+	h.torClient = &clientCopy
+	h.torIPClient = &ipClientCopy
+	h.torDialer = dialer
+	return nil
+}
+
+func (h *HTTPSHandler) upstreamClientForHost(hostname string) *http.Client {
+	h.upstreamMu.RLock()
+	defer h.upstreamMu.RUnlock()
+
+	if net.ParseIP(hostname) != nil {
+		if h.torIPClient != nil {
+			return h.torIPClient
+		}
+		return h.ipClient
+	}
+
+	if h.torClient != nil {
+		return h.torClient
+	}
+	return h.client
+}
+
+func (h *HTTPSHandler) dialTunnelTarget(target string, timeout time.Duration) (net.Conn, error) {
+	h.upstreamMu.RLock()
+	dialer := h.torDialer
+	h.upstreamMu.RUnlock()
+
+	if dialer != nil {
+		return dialer.Dial("tcp", target)
+	}
+	return net.DialTimeout("tcp", target, timeout)
+}
+
 // HandleConnection intercepts a raw TCP connection, performs SNI sniffing,
 // and upgrades it to a MITM TLS connection for inspection.
 func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
@@ -228,7 +297,7 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 		dialHost = upstreamAddr
 	}
 	dialTarget := net.JoinHostPort(dialHost, strconv.Itoa(upstreamPort))
-	upstreamConn, err := net.DialTimeout("tcp", dialTarget, 10*time.Second)
+	upstreamConn, err := h.dialTunnelTarget(dialTarget, 10*time.Second)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s (%s): %v", hostname, dialTarget, err))
 		logTunnelResponse(reqID, sourceIP, hostname, logMode)
@@ -327,11 +396,7 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		proxyReq.Header.Set("Accept-Encoding", "gzip")
 	}
 
-	upstreamClient := h.client
-	if net.ParseIP(hostname) != nil {
-		upstreamClient = h.ipClient
-	}
-
+	upstreamClient := h.upstreamClientForHost(hostname)
 	resp, err := upstreamClient.Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))

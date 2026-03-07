@@ -22,6 +22,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tor"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
 
@@ -50,6 +51,7 @@ type Server struct {
 	rewriter           *rewrites.Engine
 	egressRuntime      EgressRuntime
 	wireguardRuntime   WireGuardRuntime
+	torRuntime         TorRuntime
 	allowQUIC          bool
 	additionalTLSPorts []int
 	inspectOnlySources []string
@@ -84,6 +86,7 @@ type RuntimeOptions struct {
 	TruncateLog        bool
 	Egress             EgressRuntime
 	WireGuard          WireGuardRuntime
+	Tor                TorRuntime
 }
 
 type EgressRuntime interface {
@@ -97,6 +100,12 @@ type WireGuardRuntime interface {
 	SaveConfig(string) (string, error)
 	Enable() (wireguard.Status, error)
 	Disable() (wireguard.Status, error)
+}
+
+type TorRuntime interface {
+	Status() (tor.Status, error)
+	Enable() (tor.Status, error)
+	Disable() (tor.Status, error)
 }
 
 func Start(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler, rewriter *rewrites.Engine) error {
@@ -117,6 +126,7 @@ func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler,
 	s.truncateLog.Store(options.Runtime.TruncateLog)
 	s.egressRuntime = options.Runtime.Egress
 	s.wireguardRuntime = options.Runtime.WireGuard
+	s.torRuntime = options.Runtime.Tor
 
 	server := &http.Server{
 		Addr:              addr,

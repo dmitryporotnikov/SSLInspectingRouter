@@ -22,6 +22,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/pcap"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tor"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/wireguard"
 )
 
@@ -128,6 +129,11 @@ func main() {
 		logger.LogError(fmt.Sprintf("WireGuard manager initialization failed: %v", err))
 		os.Exit(1)
 	}
+	torManager, err := tor.NewManager(tor.DefaultSOCKSAddress())
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Tor manager initialization failed: %v", err))
+		os.Exit(1)
+	}
 
 	var dnsProxy *dnsproxy.DNSProxy
 	if blockList != nil && blockList.Count() > 0 {
@@ -193,6 +199,7 @@ func main() {
 					TruncateLog:        *truncateLog,
 					Egress:             firewallManager,
 					WireGuard:          wireGuardManager,
+					Tor:                torManager,
 				},
 			}
 			if err := dashboard.StartWithOptions(logger.DB, *webFlag, httpsHandler, rewriter, options); err != nil {

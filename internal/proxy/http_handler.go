@@ -24,6 +24,9 @@ type HTTPHandler struct {
 	bypassList *blocklist.BlockList
 	rewriter   *rewrites.Engine
 	policyMu   sync.RWMutex
+
+	upstreamMu sync.RWMutex
+	torClient  *http.Client
 }
 
 // NewHTTPHandler creates a new HTTP proxy handler.
@@ -83,6 +86,36 @@ func (h *HTTPHandler) currentBypassList() *blocklist.BlockList {
 	return h.bypassList
 }
 
+// SetSOCKSProxy enables or disables upstream routing via SOCKS5.
+func (h *HTTPHandler) SetSOCKSProxy(enabled bool, socksAddr string) error {
+	h.upstreamMu.Lock()
+	defer h.upstreamMu.Unlock()
+
+	if !enabled {
+		h.torClient = nil
+		return nil
+	}
+
+	roundTripper, _, err := buildSOCKS5RoundTripper(h.Client.Transport, socksAddr)
+	if err != nil {
+		return err
+	}
+
+	clientCopy := *h.Client
+	clientCopy.Transport = roundTripper
+	h.torClient = &clientCopy
+	return nil
+}
+
+func (h *HTTPHandler) upstreamClient() *http.Client {
+	h.upstreamMu.RLock()
+	defer h.upstreamMu.RUnlock()
+	if h.torClient != nil {
+		return h.torClient
+	}
+	return h.Client
+}
+
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	sourceIP := getSourceIP(r)
 	fullURL, targetHost, err := buildProxyTarget(r)
@@ -139,7 +172,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Host = proxyReq.URL.Host
 	}
 
-	resp, err := h.Client.Do(proxyReq)
+	resp, err := h.upstreamClient().Do(proxyReq)
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		writePlainError(w, http.StatusBadGateway, "Bad Gateway")

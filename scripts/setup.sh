@@ -27,6 +27,10 @@ if ! command -v ip &> /dev/null; then
     echo "WARNING: iproute2 'ip' command not found. WireGuard status checks will be unavailable."
 fi
 
+if ! command -v tor &> /dev/null; then
+    echo "WARNING: Tor binary not found. Tor egress toggle requires a running Tor SOCKS endpoint (default 127.0.0.1:9050)."
+fi
+
 echo "Enabling IP forwarding..."
 
 sysctl -w net.ipv4.ip_forward=1
