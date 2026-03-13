@@ -2,11 +2,58 @@
 
 ![Banner](banner.jpg)
 
-This repository contains a transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It utilizes the kernel packet filtering framework to redirect web traffic to local userspace listeners.
+A transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It uses the kernel packet filtering framework to redirect web traffic to local userspace listeners for inspection, logging, and optional content modification.
+
+## Features
+
+- **Transparent HTTP/HTTPS interception** - Redirects traffic using iptables NAT
+- **TLS/SSL MITM** - Dynamically generates certificates for intercepted connections
+- **SQLite traffic logging** - Full request/response capture with search
+- **Web Dashboard** - Real-time traffic view, policy management, rewrite rules
+- **WireGuard Egress** - Route traffic through WireGuard tunnels (runtime toggleable)
+- **Tor Egress** - Route traffic through Tor SOCKS5 proxy (runtime toggleable)
+- **Response Rewriting** - Modify HTTP/HTTPS responses on the fly with JSON rules
+- **PCAP Export** - Export decrypted traffic for Wireshark analysis
+- **Content Blocking** - Drop or bypass inspection by domain/IP/CIDR
+- **Allowlist Mode** - Only inspect traffic from specific source IPs
+
+> **⚠️ Security Warning:** This tool performs TLS/SSL interception (MITM). Only use in controlled environments you own. Always change default credentials.
+
+## Quick Start
+
+```bash
+# 1. Run setup script (enables IP forwarding, checks dependencies)
+sudo ./scripts/setup.sh
+
+# 2. Run the router (requires root)
+sudo ./sslinspectingrouter
+
+# 3. Access the web dashboard
+# Open http://<router-ip>:3000 in your browser
+# Default credentials: admin / admin123
+```
 
 ## Demo
 
 ![Preview](preview.gif)
+
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Build and Initialization](#build-and-initialization)
+- [Execution](#execution)
+  - [Command Line Arguments](#command-line-arguments)
+  - [Web Dashboard Authentication](#web-dashboard-authentication)
+  - [WireGuard Egress](#wireguard-egress-web-ui-runtime-toggle)
+  - [Tor Egress](#tor-egress-web-ui-runtime-toggle)
+  - [Shutdown](#shutdown)
+- [Logging](#logging)
+- [Response Tampering (Rewrites)](#response-tampering-rewrites)
+- [API (v1)](#api-v1)
+  - [Database Schema](#database-schema)
+- [Security Considerations](#security-considerations)
+- [Limitations](#limitations)
+- [Troubleshooting](#troubleshooting)
 
 ## How It Works
 
@@ -86,7 +133,7 @@ Common dependencies on Debian/Ubuntu:
 * `iproute2` (provides `ip`)
 * `wireguard-tools` (provides `wg-quick`; needed for WireGuard egress mode)
 * `tor` (needed for Tor egress mode; default SOCKS endpoint `127.0.0.1:9050`)
-* Go compiler (`golang`)
+* Go compiler (`golang`) - **requires Go 1.21 or later**
 
 To build the project:
 
@@ -136,10 +183,11 @@ The project root also contains a `wireguard/` directory for WireGuard client con
 When `-web` is enabled, the dashboard API requires authentication.
 When `-webtls` is also enabled, session cookies are marked secure and the dashboard is served over HTTPS.
 
-Bootstrap admin account (created on first run if no users exist):
+> **⚠️ Default Credentials Warning:** Change these immediately in production!
+> - Username: `admin`
+> - Password: `admin123`
 
-* Username: `admin`
-* Password: `admin123`
+Bootstrap admin account (created on first run if no users exist):
 
 Optional environment variables for bootstrap/admin configuration:
 
@@ -351,3 +399,75 @@ The database contains two primary tables: `Requests` and `Responses`.
 | `content` | The body content. Stores full body by default; max 4KB if `-truncatelog` is used. |
 
 > **Note:** Unrecognized binary responses may appear as blobs in the `content` column.
+
+## Security Considerations
+
+> **⚠️ Important Security Notes:**
+
+- **Trusted Networks Only:** This tool performs TLS/SSL man-in-the-middle interception. Only deploy on networks you own and control (e.g., personal lab, corporate network with proper authorization).
+- **Change Default Credentials:** The default admin password (`admin123`) should be changed immediately using environment variables or the dashboard.
+- **Production Deployment:** When running in production, set `SIR_SESSION_SECRET` to a random value to secure session cookies.
+- **CA Certificate Trust:** Clients must trust the generated `ca-cert.pem` to avoid TLS handshake failures. Ensure this certificate is installed only on devices you intend to intercept.
+- **Network Exposure:** Be careful exposing the web dashboard. Consider binding to `127.0.0.1:3000` and using SSH tunneling, or using the `-webtls` option with proper certificates.
+- **Database Security:** The SQLite database contains captured traffic including sensitive data. Protect `logs/traffic.db` appropriately.
+
+## Limitations
+
+- **IPv4 Only:** Currently only supports IPv4 traffic. IPv6 is not intercepted.
+- **TCP Traffic:** Only TCP traffic is intercepted. UDP-based protocols (except when QUIC is explicitly allowed) are not supported.
+- **Performance:** High-volume production networks may require tuning. Interception adds latency due to certificate generation and encryption/decryption.
+- **SNI-Based Filtering:** HTTPS filtering is based on Server Name Indication (SNI). Connections using IP-only TLS (no SNI) cannot be selectively filtered by domain.
+- **Non-HTTP Traffic:** This proxy is designed for HTTP/HTTPS. Other protocols over port 443 (like SSH, RDP) will be interrupted when TLS interception is active.
+
+## Troubleshooting
+
+### Browser shows TLS/SSL errors after enabling interception
+
+1. The client doesn't trust the CA. Import `ca-cert.pem` into the client's trusted root store.
+2. For browsers, you may need to restart after importing the CA certificate.
+3. On mobile devices, some apps have their own certificate stores and won't respect the system store.
+
+### Traffic not being redirected to the proxy
+
+1. Ensure you're running as root (`sudo`).
+2. Check that `net.ipv4.ip_forward` is enabled (`sysctl net.ipv4.ip_forward`).
+3. Verify iptables rules exist: `sudo iptables -t nat -L -n`
+4. Ensure the client has this Linux host set as its default gateway.
+
+### Database growing too large
+
+1. Use `-truncatelog` to limit stored body content to 4KB.
+2. Use `-log_nothing` to disable traffic logging entirely.
+3. Periodically run with `-wipedb` to clear old traffic data.
+4. Enable body artifacts only when needed for debugging.
+
+### WireGuard/Tor egress not working
+
+1. Verify the WireGuard config or Tor daemon is properly configured.
+2. Check that required binaries are installed (`wg-quick`, `tor`).
+3. For WireGuard, check the interface comes up: `ip link show wg0`
+4. For Tor, verify it's running and reachable: `curl --socks5 127.0.0.1:9050 http://check.torproject.org`
+
+### Application won't start
+
+1. Port 8080 or 8443 may be in use. Check: `ss -tlnp | grep -E '8080|8443'`
+2. Another instance may be running. Check processes: `ps aux | grep sslinspectingrouter`
+3. If iptables rules from a previous crash remain, manually clean up:
+   ```bash
+   sudo iptables -t nat -F SSLPROXY
+   sudo iptables -t nat -F SSL_DISPATCH
+   sudo iptables -t filter -F FORWARD
+   ```
+
+### Web dashboard inaccessible
+
+1. Verify the dashboard is enabled with `-web` flag.
+2. Check the port is open: `ss -tlnp | grep 3000` (or your configured port).
+3. If bound to `127.0.0.1`, access locally or use SSH port forwarding.
+4. Check firewall rules on the host.
+
+### High CPU usage
+
+1. Large numbers of simultaneous connections can cause high CPU usage.
+2. Consider enabling truncate mode (`-truncatelog`).
+3. Use the allowlist mode (`-inspectonly`) to limit inspected traffic sources.
