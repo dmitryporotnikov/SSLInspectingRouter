@@ -54,6 +54,7 @@ sudo ./sslinspectingrouter
 - [Security Considerations](#security-considerations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 
 ## How It Works
 
@@ -471,3 +472,36 @@ The database contains two primary tables: `Requests` and `Responses`.
 1. Large numbers of simultaneous connections can cause high CPU usage.
 2. Consider enabling truncate mode (`-truncatelog`).
 3. Use the allowlist mode (`-inspectonly`) to limit inspected traffic sources.
+
+## Contributing
+
+We welcome contributions to SSLInspectingRouter! To help us maintain a high-quality codebase, please review and follow these guidelines:
+
+**AI-Generated Code:** We accept AI-generated contributions. If you use AI assistance to write code, please review and understand the code before submitting.
+
+### How to Contribute
+
+1. **Fork the repository**
+   Click "Fork" at the top right of this page and clone your fork locally.
+
+2. **Create a new branch**
+   Branch names should be descriptive, e.g. `feature/add-ipv6-support` or `fix/crash-on-rewrite`.
+
+3. **Make your changes**
+   Please keep your changes focused and avoid unrelated formatting edits.
+
+4. **Write clear commit messages**
+   Describe what your change does and why it's needed.
+
+5. **Test your changes**
+   Ensure that existing tests pass and write new tests for your features or bugfixes if possible.
+
+6. **Submit a Pull Request**
+   Push your branch and open a Pull Request (PR) to the main branch. Include:
+   - A summary of your changes
+   - Any relevant issue numbers (e.g., Closes #12)
+   - Screenshots or logs if relevant
+
+### Code Review
+
+Be responsive to feedback and please update your PR as requested.
