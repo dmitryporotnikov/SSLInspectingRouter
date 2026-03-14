@@ -22,13 +22,17 @@ A transparent interception proxy written in Go for HTTP and HTTPS traffic on Lin
 ## Quick Start
 
 ```bash
-# 1. Run setup script (enables IP forwarding, checks dependencies)
+# 1. Clone the repository
+git clone https://github.com/dmitryporotnikov/SSLInspectingRouter.git
+
+# 2. Run setup script (enables IP forwarding, checks dependencies)
+cd SSLInspectingRouter
 sudo ./scripts/setup.sh
 
-# 2. Run the router (requires root)
-sudo ./sslinspectingrouter
+# 3. Run the router (requires root)
+sudo ./sslinspectingrouter -web :3000
 
-# 3. Access the web dashboard
+# 4. Access the web dashboard
 # Open http://<router-ip>:3000 in your browser
 # Default credentials: admin / admin123
 ```
