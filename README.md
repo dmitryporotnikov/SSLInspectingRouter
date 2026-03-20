@@ -58,6 +58,7 @@ sudo ./sslinspectingrouter -web :3000
 - [Security Considerations](#security-considerations)
 - [Limitations](#limitations)
 - [Troubleshooting](#troubleshooting)
+- [Localization](#localization)
 - [Contributing](#contributing)
 
 ## How It Works
@@ -476,6 +477,16 @@ The database contains two primary tables: `Requests` and `Responses`.
 1. Large numbers of simultaneous connections can cause high CPU usage.
 2. Consider enabling truncate mode (`-truncatelog`).
 3. Use the allowlist mode (`-inspectonly`) to limit inspected traffic sources.
+
+## Localization
+
+The Web Dashboard supports UI localization.
+
+* A language picker is available on the login screen and in the main dashboard top bar.
+* Changing the language reloads the UI in the selected locale.
+* Languages are discovered from embedded locale JSON files, so the dropdown is populated automatically from available locale bundles.
+* Current bundled locales are English (`en`) and Russian (`ru`).
+* Contributor guide for new languages: `LOCALIZATION_CONTRIBUTING.md`
 
 ## Contributing
 

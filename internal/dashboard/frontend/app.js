@@ -2,6 +2,13 @@ const state = {
     user: null,
     authToken: null,
     theme: "dark",
+    locale: {
+        code: "en",
+        languages: [],
+        strings: {},
+        fallbackStrings: {},
+        ready: false,
+    },
     connection: {
         connected: true,
         consecutiveFailures: 0,
@@ -38,10 +45,13 @@ const state = {
 };
 
 const THEME_KEY = "sir_theme";
+const LANGUAGE_KEY = "sir_language";
+const DEFAULT_LOCALE_CODE = "en";
 const CONNECTION_FAILURE_THRESHOLD = 3;
 const CONNECTION_STALE_AFTER_MS = 10000;
 
 const dom = {
+    languageSelects: Array.from(document.querySelectorAll("[data-language-select]")),
     loginView: document.getElementById("login-view"),
     appView: document.getElementById("app-view"),
     loginForm: document.getElementById("login-form"),
@@ -163,17 +173,6 @@ function isAdmin() {
     return state.user && state.user.role === "admin";
 }
 
-function escapeHTML(value) {
-    if (value === null || value === undefined) return "";
-    const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    return text
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
 function clearElement(element) {
     if (!element) return;
     while (element.firstChild) {
@@ -202,6 +201,252 @@ function normalizeClassToken(value, fallback) {
     return fallback;
 }
 
+function normalizeLocaleCode(raw) {
+    return String(raw || "")
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, "-");
+}
+
+function currentLocaleCode() {
+    return normalizeLocaleCode(state.locale.code) || DEFAULT_LOCALE_CODE;
+}
+
+function lookupTranslation(source, key) {
+    if (!source || typeof source !== "object" || !key) {
+        return undefined;
+    }
+    return String(key)
+        .split(".")
+        .reduce((value, token) => (value && typeof value === "object" ? value[token] : undefined), source);
+}
+
+function interpolate(template, params = {}) {
+    return String(template).replace(/\{(\w+)\}/g, (match, token) => {
+        if (Object.prototype.hasOwnProperty.call(params, token)) {
+            return String(params[token]);
+        }
+        return match;
+    });
+}
+
+function t(key, params = {}) {
+    const direct = lookupTranslation(state.locale.strings, key);
+    if (typeof direct === "string") {
+        return interpolate(direct, params);
+    }
+    const fallback = lookupTranslation(state.locale.fallbackStrings, key);
+    if (typeof fallback === "string") {
+        return interpolate(fallback, params);
+    }
+    return key;
+}
+
+function tp(baseKey, count, params = {}) {
+    const suffix = Number(count) === 1 ? "one" : "other";
+    return t(`${baseKey}.${suffix}`, { count, ...params });
+}
+
+function loadStoredLanguage() {
+    try {
+        return normalizeLocaleCode(window.localStorage.getItem(LANGUAGE_KEY));
+    } catch (_error) {
+        return "";
+    }
+}
+
+function persistLanguage(code) {
+    try {
+        window.localStorage.setItem(LANGUAGE_KEY, normalizeLocaleCode(code));
+    } catch (_error) {
+        // Ignore storage failures; language still applies for this load.
+    }
+}
+
+function defaultLanguageCatalog() {
+    return [
+        {
+            code: DEFAULT_LOCALE_CODE,
+            name: "English",
+            native_name: "English",
+            url: "/locales/en.json",
+        },
+    ];
+}
+
+async function readJSON(url) {
+    const response = await fetch(url, {
+        headers: {
+            Accept: "application/json",
+        },
+        credentials: "same-origin",
+    });
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+    return response.json();
+}
+
+async function loadLanguageCatalog() {
+    try {
+        const payload = await readJSON("/api/v1/localization/languages");
+        const languages = Array.isArray(payload.languages) ? payload.languages : [];
+        if (languages.length > 0) {
+            return languages;
+        }
+    } catch (error) {
+        console.error("language catalog load failed", error);
+    }
+    return defaultLanguageCatalog();
+}
+
+function findLanguageOption(code) {
+    const normalized = normalizeLocaleCode(code);
+    return state.locale.languages.find((language) => normalizeLocaleCode(language.code) === normalized) || null;
+}
+
+async function loadLocaleBundle(code, options = {}) {
+    const { allowFallback = true } = options;
+    const language = findLanguageOption(code);
+    if (!language || !language.url) {
+        if (allowFallback && normalizeLocaleCode(code) !== DEFAULT_LOCALE_CODE) {
+            return loadLocaleBundle(DEFAULT_LOCALE_CODE, { allowFallback: false });
+        }
+        throw new Error(`missing locale bundle for ${code}`);
+    }
+
+    try {
+        const payload = await readJSON(language.url);
+        return {
+            code: normalizeLocaleCode((payload.meta && payload.meta.code) || language.code || code),
+            strings: payload && payload.strings && typeof payload.strings === "object" ? payload.strings : {},
+        };
+    } catch (error) {
+        if (allowFallback && normalizeLocaleCode(code) !== DEFAULT_LOCALE_CODE) {
+            return loadLocaleBundle(DEFAULT_LOCALE_CODE, { allowFallback: false });
+        }
+        throw error;
+    }
+}
+
+function preferredLanguageCode() {
+    const availableCodes = new Set(state.locale.languages.map((language) => normalizeLocaleCode(language.code)));
+    const urlLanguage = normalizeLocaleCode(new URL(window.location.href).searchParams.get("lang"));
+    if (urlLanguage && availableCodes.has(urlLanguage)) {
+        return urlLanguage;
+    }
+    const storedLanguage = loadStoredLanguage();
+    if (storedLanguage && availableCodes.has(storedLanguage)) {
+        return storedLanguage;
+    }
+    if (availableCodes.has(DEFAULT_LOCALE_CODE)) {
+        return DEFAULT_LOCALE_CODE;
+    }
+    const firstLanguage = state.locale.languages[0];
+    return firstLanguage ? normalizeLocaleCode(firstLanguage.code) : DEFAULT_LOCALE_CODE;
+}
+
+function populateLanguageOptions() {
+    dom.languageSelects.forEach((select) => {
+        clearElement(select);
+        state.locale.languages.forEach((language) => {
+            const option = document.createElement("option");
+            const code = normalizeLocaleCode(language.code);
+            const displayName = String(language.native_name || language.name || code);
+            const secondaryName = String(language.name || "");
+            option.value = code;
+            option.textContent = displayName !== secondaryName && secondaryName !== ""
+                ? `${displayName} (${secondaryName})`
+                : displayName;
+            select.appendChild(option);
+        });
+        select.value = currentLocaleCode();
+    });
+}
+
+function formatRole(role) {
+    const normalized = normalizeClassToken(role, "");
+    if (!normalized) {
+        return "-";
+    }
+    const translated = lookupTranslation(state.locale.strings, `roles.${normalized}`) || lookupTranslation(state.locale.fallbackStrings, `roles.${normalized}`);
+    return typeof translated === "string" ? translated : String(role);
+}
+
+function formatTrafficMode(mode) {
+    const normalized = normalizeClassToken(mode, "inspected");
+    const translated = lookupTranslation(state.locale.strings, `traffic.modes.${normalized}`) || lookupTranslation(state.locale.fallbackStrings, `traffic.modes.${normalized}`);
+    return typeof translated === "string" ? translated : String(mode || normalized);
+}
+
+function formatManagedFileLabel(filePath) {
+    if (filePath) {
+        return t("rewrites.managedFileValue", { file: filePath });
+    }
+    return t("rewrites.managedFileEmpty");
+}
+
+function applyStaticTranslations() {
+    document.documentElement.lang = currentLocaleCode();
+    document.title = t("app.title");
+
+    Array.from(document.querySelectorAll("[data-i18n]")).forEach((element) => {
+        element.textContent = t(element.dataset.i18n);
+    });
+    Array.from(document.querySelectorAll("[data-i18n-html]")).forEach((element) => {
+        element.innerHTML = t(element.dataset.i18nHtml);
+    });
+    Array.from(document.querySelectorAll("[data-i18n-placeholder]")).forEach((element) => {
+        element.placeholder = t(element.dataset.i18nPlaceholder);
+    });
+    Array.from(document.querySelectorAll("[data-i18n-title]")).forEach((element) => {
+        element.title = t(element.dataset.i18nTitle);
+    });
+    Array.from(document.querySelectorAll("[data-i18n-aria-label]")).forEach((element) => {
+        element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+    });
+
+    updateThemeToggle();
+    setConnectionState(state.connection.connected);
+    resetUserForm();
+    renderTraffic();
+    renderRewriteEditor();
+    if (state.status) {
+        applyStatus(state.status);
+    }
+    if (state.user) {
+        applyUserContext();
+    }
+    renderUsers();
+}
+
+async function initializeLocalization() {
+    state.locale.languages = await loadLanguageCatalog();
+    const preferredCode = preferredLanguageCode();
+    persistLanguage(preferredCode);
+
+    const primaryBundle = await loadLocaleBundle(preferredCode);
+    let fallbackStrings = primaryBundle.strings;
+    if (normalizeLocaleCode(primaryBundle.code) !== DEFAULT_LOCALE_CODE) {
+        try {
+            const fallbackBundle = await loadLocaleBundle(DEFAULT_LOCALE_CODE, { allowFallback: false });
+            fallbackStrings = fallbackBundle.strings;
+        } catch (error) {
+            console.error("default locale load failed", error);
+        }
+    }
+
+    state.locale.code = primaryBundle.code || preferredCode;
+    state.locale.strings = primaryBundle.strings;
+    state.locale.fallbackStrings = fallbackStrings;
+    state.locale.ready = true;
+    persistLanguage(state.locale.code);
+
+    populateLanguageOptions();
+    applyStaticTranslations();
+    document.body.dataset.i18nState = "ready";
+}
+
 function formatBytes(bytes) {
     const value = Number(bytes || 0);
     if (!Number.isFinite(value) || value <= 0) {
@@ -217,12 +462,12 @@ function formatTime(timestamp) {
     if (!timestamp) return "-";
     const date = new Date(timestamp);
     if (Number.isNaN(date.getTime())) return timestamp;
-    return date.toLocaleString();
+    return date.toLocaleString(currentLocaleCode());
 }
 
 function setConnectionState(connected) {
     state.connection.connected = connected;
-    dom.metricConnection.textContent = connected ? "Connected" : "Disconnected";
+    dom.metricConnection.textContent = connected ? t("status.connected") : t("status.disconnected");
     dom.metricConnection.style.color = connected ? "var(--ok)" : "var(--danger)";
 }
 
@@ -271,8 +516,8 @@ function updateThemeToggle() {
     const theme = normalizeTheme(state.theme);
     const nextTheme = theme === "dark" ? "light" : "dark";
     dom.themeToggleIcon.textContent = theme === "dark" ? "☾" : "☀";
-    dom.themeToggle.title = `Switch to ${nextTheme} theme`;
-    dom.themeToggle.setAttribute("aria-label", `Switch to ${nextTheme} theme`);
+    dom.themeToggle.title = t("theme.switchTo", { theme: t(`theme.${nextTheme}`) });
+    dom.themeToggle.setAttribute("aria-label", t("theme.switchTo", { theme: t(`theme.${nextTheme}`) }));
 }
 
 function applyTheme(theme) {
@@ -326,7 +571,7 @@ async function apiRequest(path, options = {}) {
         if (trackConnectivity) {
             reportApiFailure();
         }
-        throw new Error("Network request failed");
+        throw new Error(t("errors.networkRequestFailed"));
     }
 
     const contentType = response.headers.get("content-type") || "";
@@ -339,7 +584,7 @@ async function apiRequest(path, options = {}) {
         if (response.status === 401 && !allowUnauthorized) {
             handleSessionExpired();
         }
-        const error = new Error((payload && payload.error) || `Request failed (${response.status})`);
+        const error = new Error((payload && payload.error) || t("errors.requestFailed", { status: response.status }));
         error.status = response.status;
         throw error;
     }
@@ -371,14 +616,14 @@ function showApp() {
 function applyUserContext() {
     const user = state.user;
     dom.currentUser.textContent = user ? user.display_name || user.username : "-";
-    dom.currentRole.textContent = user ? user.role : "-";
+    dom.currentRole.textContent = user ? formatRole(user.role) : "-";
 
     const admin = isAdmin();
     dom.usersNav.classList.toggle("hidden", !admin);
     dom.settingsPanel.classList.toggle("hidden", !admin);
     dom.bodyArtifactsMeta.classList.toggle("hidden", !admin);
     dom.flushTrafficBtn.disabled = !admin;
-    dom.flushTrafficBtn.title = admin ? "Delete captured traffic" : "Admin role required";
+    dom.flushTrafficBtn.title = admin ? t("traffic.flushTitle") : t("users.adminRequired");
     if (!admin && state.section === "users") {
         switchSection("traffic");
     }
@@ -402,6 +647,12 @@ function switchSection(section) {
 }
 
 async function bootstrap() {
+    try {
+        await initializeLocalization();
+    } catch (error) {
+        console.error("localization bootstrap failed", error);
+        document.body.dataset.i18nState = "ready";
+    }
     initializeTheme();
     bindEvents();
 
@@ -424,6 +675,16 @@ async function bootstrap() {
 
 function bindEvents() {
     dom.loginForm.addEventListener("submit", handleLogin);
+    dom.languageSelects.forEach((select) => {
+        select.addEventListener("change", () => {
+            const nextCode = normalizeLocaleCode(select.value);
+            if (!nextCode || nextCode === currentLocaleCode()) {
+                return;
+            }
+            persistLanguage(nextCode);
+            window.location.reload();
+        });
+    });
     dom.themeToggle.addEventListener("click", toggleTheme);
     dom.logoutBtn.addEventListener("click", handleLogout);
 
@@ -604,7 +865,7 @@ async function handleLogin(event) {
     const password = dom.loginPassword.value;
 
     if (!username || !password) {
-        dom.loginError.textContent = "Username and password are required.";
+        dom.loginError.textContent = t("login.errors.required");
         dom.loginError.classList.remove("hidden");
         return;
     }
@@ -661,8 +922,8 @@ function handleSessionExpired() {
         transientEmptySkips: 0,
     };
     state.section = "traffic";
-    dom.bodyArtifactsDir.textContent = "disabled";
-    dom.bodyArtifactsDir.title = "disabled";
+    dom.bodyArtifactsDir.textContent = t("status.disabled");
+    dom.bodyArtifactsDir.title = t("status.disabled");
     dom.bodyArtifactsDirectoryInput.value = "";
     dom.wireguardConfigInput.value = "";
     dom.dropListCount.textContent = "0";
@@ -671,30 +932,30 @@ function handleSessionExpired() {
     dom.bypassListInput.value = "";
     dom.policySaveStatus.textContent = "";
     dom.wireguardConfigStatus.textContent = "";
-    dom.wireguardMetaValue.textContent = "inactive";
-    dom.wireguardMetaValue.title = "inactive";
+    dom.wireguardMetaValue.textContent = t("status.inactive");
+    dom.wireguardMetaValue.title = t("status.inactive");
     dom.wireguardToggle.checked = false;
-    dom.torMetaValue.textContent = "inactive";
-    dom.torMetaValue.title = "inactive";
+    dom.torMetaValue.textContent = t("status.inactive");
+    dom.torMetaValue.title = t("status.inactive");
     dom.torToggle.checked = false;
     dom.torStatus.textContent = "";
     dom.allowQuicValue.textContent = "-";
-    dom.tlsPortsValue.textContent = "default";
-    dom.inspectOnlyValue.textContent = "all sources";
-    dom.pcapPathValue.textContent = "disabled";
+    dom.tlsPortsValue.textContent = t("status.default");
+    dom.inspectOnlyValue.textContent = t("status.allSources");
+    dom.pcapPathValue.textContent = t("status.disabled");
     dom.egressInterfaceValue.textContent = "-";
     dom.defaultEgressInterfaceValue.textContent = "-";
     dom.truncateLogToggle.checked = false;
     dom.logNothingToggle.checked = false;
     dom.rewriteCount.textContent = "0";
-    dom.rewriteManagedFile.textContent = "managed file: -";
+    dom.rewriteManagedFile.textContent = formatManagedFileLabel("");
     syncEgressToggleAvailability();
     resetUserForm();
     resetRewriteForm();
     renderTraffic();
     renderRewriteEditor();
     renderUsers();
-    showLogin("Session expired. Please sign in again.");
+    showLogin(t("session.expired"));
 }
 
 function startPolling() {
@@ -740,7 +1001,7 @@ function applyStatus(status) {
     dom.metricDBSize.textContent = formatBytes(status.db_size_bytes || 0);
     const requestCount = Number(status.request_count);
     if (Number.isFinite(requestCount) && requestCount >= 0) {
-        dom.metricRequests.textContent = requestCount.toLocaleString();
+        dom.metricRequests.textContent = requestCount.toLocaleString(currentLocaleCode());
     }
     const wireguardEnabled = !!status.wireguard_enabled;
     const torEnabled = !!status.tor_enabled;
@@ -760,11 +1021,11 @@ function applyStatus(status) {
         dom.bodyArtifactsDir.textContent = artifactsDir;
         dom.bodyArtifactsDir.title = artifactsDir;
     } else {
-        dom.bodyArtifactsDir.textContent = "disabled";
-        dom.bodyArtifactsDir.title = "disabled";
+        dom.bodyArtifactsDir.textContent = t("status.disabled");
+        dom.bodyArtifactsDir.title = t("status.disabled");
     }
 
-    dom.allowQuicValue.textContent = status.allow_quic ? "enabled" : "blocked";
+    dom.allowQuicValue.textContent = status.allow_quic ? t("status.enabled") : t("status.blocked");
 
     const ports = Array.isArray(status.additional_tls_ports) ? status.additional_tls_ports : [];
     if (ports.length > 0) {
@@ -772,8 +1033,8 @@ function applyStatus(status) {
         dom.tlsPortsValue.textContent = value;
         dom.tlsPortsValue.title = value;
     } else {
-        dom.tlsPortsValue.textContent = "default";
-        dom.tlsPortsValue.title = "default";
+        dom.tlsPortsValue.textContent = t("status.default");
+        dom.tlsPortsValue.title = t("status.default");
     }
 
     const inspectOnly = Array.isArray(status.inspect_only_sources) ? status.inspect_only_sources : [];
@@ -782,8 +1043,8 @@ function applyStatus(status) {
         dom.inspectOnlyValue.textContent = value;
         dom.inspectOnlyValue.title = value;
     } else {
-        dom.inspectOnlyValue.textContent = "all sources";
-        dom.inspectOnlyValue.title = "all sources";
+        dom.inspectOnlyValue.textContent = t("status.allSources");
+        dom.inspectOnlyValue.title = t("status.allSources");
     }
 
     const pcapPath = String(status.pcap_path || "").trim();
@@ -791,19 +1052,19 @@ function applyStatus(status) {
         dom.pcapPathValue.textContent = pcapPath;
         dom.pcapPathValue.title = pcapPath;
     } else {
-        dom.pcapPathValue.textContent = "disabled";
-        dom.pcapPathValue.title = "disabled";
+        dom.pcapPathValue.textContent = t("status.disabled");
+        dom.pcapPathValue.title = t("status.disabled");
     }
 
     const wireguardInterface = String(status.wireguard_interface || "").trim();
     const wireguardConfigPresent = !!status.wireguard_config_present;
     const wireguardConfigPath = String(status.wireguard_config_path || "").trim();
-    let wireguardMeta = wireguardEnabled ? "active" : "inactive";
+    let wireguardMeta = wireguardEnabled ? t("status.active") : t("status.inactive");
     if (wireguardInterface) {
         wireguardMeta += ` (${wireguardInterface})`;
     }
     if (!wireguardConfigPresent) {
-        wireguardMeta += " | no config";
+        wireguardMeta += ` | ${t("status.noConfig")}`;
     }
     dom.wireguardMetaValue.textContent = wireguardMeta;
     dom.wireguardMetaValue.title = wireguardConfigPath || wireguardMeta;
@@ -811,12 +1072,12 @@ function applyStatus(status) {
     const torSOCKSAddress = String(status.tor_socks_address || "").trim();
     const torReachable = !!status.tor_reachable;
     const torLastError = String(status.tor_last_error || "").trim();
-    let torMeta = torEnabled ? "active" : "inactive";
+    let torMeta = torEnabled ? t("status.active") : t("status.inactive");
     if (torSOCKSAddress) {
         torMeta += ` (${torSOCKSAddress})`;
     }
     if (torEnabled && !torReachable) {
-        torMeta += " | offline";
+        torMeta += ` | ${t("status.offline")}`;
     }
     dom.torMetaValue.textContent = torMeta;
     dom.torMetaValue.title = torMeta;
@@ -938,18 +1199,18 @@ async function updateWireGuard(enabled) {
     }
     if (enabled && state.status && state.status.tor_enabled) {
         dom.wireguardToggle.checked = false;
-        dom.wireguardConfigStatus.textContent = "Disable Tor egress before enabling WireGuard.";
-        alert("Disable Tor egress before enabling WireGuard.");
+        dom.wireguardConfigStatus.textContent = t("wireguard.disableTorFirst");
+        alert(t("wireguard.disableTorFirst"));
         syncEgressToggleAvailability();
         return;
     }
 
-    dom.wireguardConfigStatus.textContent = enabled ? "Enabling tunnel..." : "Disabling tunnel...";
+    dom.wireguardConfigStatus.textContent = enabled ? t("wireguard.enabling") : t("wireguard.disabling");
     dom.wireguardToggle.disabled = true;
 
     try {
         await updateDashboardSettings({ wireguard_enabled: enabled });
-        dom.wireguardConfigStatus.textContent = enabled ? "WireGuard tunnel enabled." : "WireGuard tunnel disabled.";
+        dom.wireguardConfigStatus.textContent = enabled ? t("wireguard.enabled") : t("wireguard.disabled");
     } catch (error) {
         dom.wireguardToggle.checked = !enabled;
         dom.wireguardConfigStatus.textContent = "";
@@ -965,18 +1226,18 @@ async function updateTor(enabled) {
     }
     if (enabled && state.status && state.status.wireguard_enabled) {
         dom.torToggle.checked = false;
-        dom.torStatus.textContent = "Disable WireGuard egress before enabling Tor.";
-        alert("Disable WireGuard egress before enabling Tor.");
+        dom.torStatus.textContent = t("tor.disableWireGuardFirst");
+        alert(t("tor.disableWireGuardFirst"));
         syncEgressToggleAvailability();
         return;
     }
 
-    dom.torStatus.textContent = enabled ? "Enabling Tor egress..." : "Disabling Tor egress...";
+    dom.torStatus.textContent = enabled ? t("tor.enabling") : t("tor.disabling");
     dom.torToggle.disabled = true;
 
     try {
         await updateDashboardSettings({ tor_enabled: enabled });
-        dom.torStatus.textContent = enabled ? "Tor egress enabled." : "Tor egress disabled.";
+        dom.torStatus.textContent = enabled ? t("tor.enabled") : t("tor.disabled");
     } catch (error) {
         dom.torToggle.checked = !enabled;
         dom.torStatus.textContent = "";
@@ -993,20 +1254,20 @@ async function saveWireGuardConfig() {
 
     const config = dom.wireguardConfigInput.value;
     if (!config || !config.trim()) {
-        alert("WireGuard config cannot be empty.");
+        alert(t("wireguard.errors.configEmpty"));
         dom.wireguardConfigInput.focus();
         return;
     }
 
     dom.wireguardConfigSave.disabled = true;
-    dom.wireguardConfigStatus.textContent = "Saving config...";
+    dom.wireguardConfigStatus.textContent = t("wireguard.savingConfig");
 
     try {
         await updateDashboardSettings({ wireguard_config: config });
         const active = !!(state.status && state.status.wireguard_enabled);
         dom.wireguardConfigStatus.textContent = active
-            ? "Config saved. Toggle tunnel off/on to apply."
-            : "WireGuard config saved.";
+            ? t("wireguard.configSavedApply")
+            : t("wireguard.configSaved");
     } catch (error) {
         dom.wireguardConfigStatus.textContent = "";
         alert(error.message);
@@ -1035,7 +1296,7 @@ async function updateBodyArtifactsDirectory() {
 
     const dir = dom.bodyArtifactsDirectoryInput.value.trim();
     if (!dir) {
-        alert("Artifact directory cannot be empty.");
+        alert(t("artifacts.errors.directoryEmpty"));
         dom.bodyArtifactsDirectoryInput.focus();
         return;
     }
@@ -1058,7 +1319,7 @@ async function updateTrafficPolicy() {
     const bypassList = parsePolicyEntries(dom.bypassListInput.value);
 
     dom.policySaveBtn.disabled = true;
-    dom.policySaveStatus.textContent = "Saving...";
+    dom.policySaveStatus.textContent = t("settings.saving");
 
     try {
         const policy = await apiRequest("/api/v1/policy", {
@@ -1069,7 +1330,7 @@ async function updateTrafficPolicy() {
             },
         });
         applyPolicy(policy);
-        dom.policySaveStatus.textContent = "Saved.";
+        dom.policySaveStatus.textContent = t("settings.saved");
     } catch (error) {
         dom.policySaveStatus.textContent = "";
         alert(error.message);
@@ -1082,13 +1343,13 @@ async function handleFlushTraffic() {
     if (!isAdmin()) {
         return;
     }
-    if (!window.confirm("Flush captured traffic from the database and clear the Traffic view?")) {
+    if (!window.confirm(t("traffic.flushConfirm"))) {
         return;
     }
 
     const previousLabel = dom.flushTrafficBtn.textContent;
     dom.flushTrafficBtn.disabled = true;
-    dom.flushTrafficBtn.textContent = "Flushing...";
+    dom.flushTrafficBtn.textContent = t("traffic.flushing");
     try {
         await apiRequest("/api/v1/traffic", { method: "DELETE" });
         state.traffic.offset = 0;
@@ -1149,7 +1410,7 @@ function parseIntegerTokenList(value, label) {
     for (const token of tokens) {
         const parsed = Number.parseInt(token, 10);
         if (!Number.isInteger(parsed) || parsed <= 0) {
-            throw new Error(`${label} must be positive integers.`);
+            throw new Error(t("rewrites.errors.positiveIntegers", { label }));
         }
         values.push(parsed);
     }
@@ -1172,12 +1433,12 @@ function parseHeaderMap(value, label) {
     for (const line of lines) {
         const separator = line.indexOf(":");
         if (separator < 1) {
-            throw new Error(`${label} lines must be in "Header: value" format.`);
+            throw new Error(t("rewrites.errors.headerFormat", { label }));
         }
         const key = line.slice(0, separator).trim();
         const val = line.slice(separator + 1).trim();
         if (!key || !val) {
-            throw new Error(`${label} lines must include both header name and value.`);
+            throw new Error(t("rewrites.errors.headerNameAndValue", { label }));
         }
         out[key] = val;
     }
@@ -1204,12 +1465,12 @@ function parseReplacementLines(value, leftLabel, rightLabel) {
     for (const line of lines) {
         const separator = line.indexOf("=>");
         if (separator < 1) {
-            throw new Error(`Use "${leftLabel} => ${rightLabel}" format per line.`);
+            throw new Error(t("rewrites.errors.replacementFormat", { left: leftLabel, right: rightLabel }));
         }
         const left = line.slice(0, separator).trim();
         const right = line.slice(separator + 2).trim();
         if (!left) {
-            throw new Error(`"${leftLabel}" value cannot be empty.`);
+            throw new Error(t("rewrites.errors.valueCannotBeEmpty", { label: leftLabel }));
         }
         out.push({ left, right });
     }
@@ -1242,18 +1503,18 @@ function rewriteActionCount(rule) {
 function rewriteMatchSummary(rule) {
     const match = rule && typeof rule.match === "object" && rule.match ? rule.match : {};
     const parts = [];
-    if (match.host) parts.push(`host=${match.host}`);
-    if (match.host_regex) parts.push("host-regex");
-    if (match.path_prefix) parts.push(`path^=${match.path_prefix}`);
-    if (match.path_regex) parts.push("path-regex");
-    if (match.method) parts.push(`method=${String(match.method).toUpperCase()}`);
-    if (Array.isArray(match.methods) && match.methods.length) parts.push(`methods=${match.methods.length}`);
-    if (match.status) parts.push(`status=${match.status}`);
-    if (Array.isArray(match.statuses) && match.statuses.length) parts.push(`statuses=${match.statuses.length}`);
-    if (match.content_type_contains) parts.push(`ct~=${match.content_type_contains}`);
-    if (match.content_type_regex) parts.push("ct-regex");
+    if (match.host) parts.push(t("rewrites.summary.host", { value: match.host }));
+    if (match.host_regex) parts.push(t("rewrites.summary.hostRegex"));
+    if (match.path_prefix) parts.push(t("rewrites.summary.pathPrefix", { value: match.path_prefix }));
+    if (match.path_regex) parts.push(t("rewrites.summary.pathRegex"));
+    if (match.method) parts.push(t("rewrites.summary.method", { value: String(match.method).toUpperCase() }));
+    if (Array.isArray(match.methods) && match.methods.length) parts.push(t("rewrites.summary.methods", { count: match.methods.length }));
+    if (match.status) parts.push(t("rewrites.summary.status", { value: match.status }));
+    if (Array.isArray(match.statuses) && match.statuses.length) parts.push(t("rewrites.summary.statuses", { count: match.statuses.length }));
+    if (match.content_type_contains) parts.push(t("rewrites.summary.contentTypeContains", { value: match.content_type_contains }));
+    if (match.content_type_regex) parts.push(t("rewrites.summary.contentTypeRegex"));
     if (!parts.length) {
-        return "matches all responses";
+        return t("rewrites.summary.matchesAllResponses");
     }
     return parts.join(" • ");
 }
@@ -1263,7 +1524,7 @@ function renderRewriteList() {
     if (!state.rewrites.items.length) {
         const empty = document.createElement("p");
         empty.className = "muted rewrite-empty";
-        empty.textContent = "No rewrite rules loaded.";
+        empty.textContent = t("rewrites.empty");
         dom.rewriteList.appendChild(empty);
         return;
     }
@@ -1272,8 +1533,8 @@ function renderRewriteList() {
     state.rewrites.items.forEach((item) => {
         const selected = item.key === state.rewrites.selectedKey;
         const rule = item.rule || {};
-        const enabled = rule.enabled === false ? "disabled" : "enabled";
-        const scopeLabel = item.managed ? "Managed" : "External";
+        const enabledLabel = rule.enabled === false ? t("status.disabled") : t("status.enabled");
+        const scopeLabel = item.managed ? t("rewrites.badges.managed") : t("rewrites.badges.external");
         const actionCount = rewriteActionCount(rule);
         const title = rule.name || `${item.file}#${item.index}`;
 
@@ -1301,7 +1562,7 @@ function renderRewriteList() {
 
         const actionMeta = document.createElement("div");
         actionMeta.className = "rewrite-list-meta";
-        actionMeta.textContent = `${enabled} • ${actionCount} action${actionCount === 1 ? "" : "s"}`;
+        actionMeta.textContent = tp("rewrites.actionCount", actionCount, { status: enabledLabel });
 
         button.appendChild(top);
         button.appendChild(matchMeta);
@@ -1379,16 +1640,14 @@ function renderRewriteEditor() {
 
     renderRewriteList();
 
-    dom.rewriteManagedFile.textContent = state.rewrites.managedFile
-        ? `managed file: ${state.rewrites.managedFile}`
-        : "managed file: -";
+    dom.rewriteManagedFile.textContent = formatManagedFileLabel(state.rewrites.managedFile);
 
     const selected = currentRewriteItem();
     const admin = isAdmin();
 
     if (!selected) {
-        dom.rewriteFormTitle.textContent = "New Rewrite Rule";
-        dom.rewriteFormOrigin.textContent = admin ? "Managed rule" : "Read-only mode";
+        dom.rewriteFormTitle.textContent = t("rewrites.newRuleTitle");
+        dom.rewriteFormOrigin.textContent = admin ? t("rewrites.managedRule") : t("rewrites.readOnlyMode");
         dom.rewriteDeleteBtn.disabled = true;
         dom.rewriteCloneBtn.classList.add("hidden");
         dom.rewriteCloneBtn.disabled = true;
@@ -1400,8 +1659,8 @@ function renderRewriteEditor() {
     const title = selected.rule && selected.rule.name ? String(selected.rule.name) : `${selected.file}#${selected.index}`;
     dom.rewriteFormTitle.textContent = title;
     dom.rewriteFormOrigin.textContent = selected.managed
-        ? `Managed rule #${selected.managed_id}`
-        : `External rule from ${selected.file}`;
+        ? t("rewrites.managedRuleNumber", { id: selected.managed_id })
+        : t("rewrites.externalRuleFrom", { file: selected.file });
 
     applyRewriteForm(selected.rule || createEmptyRewriteRule());
 
@@ -1425,7 +1684,7 @@ function selectRewriteKey(key) {
     if (key === state.rewrites.selectedKey) {
         return;
     }
-    if (state.rewrites.dirty && !window.confirm("Discard unsaved rewrite changes?")) {
+    if (state.rewrites.dirty && !window.confirm(t("rewrites.discardUnsavedChanges"))) {
         return;
     }
     state.rewrites.selectedKey = key;
@@ -1437,7 +1696,7 @@ function selectRewriteKey(key) {
 function buildRewriteRuleFromForm() {
     const name = dom.rewriteName.value.trim();
     if (!name) {
-        throw new Error("Rule name is required.");
+        throw new Error(t("rewrites.errors.ruleNameRequired"));
     }
 
     const match = {};
@@ -1461,12 +1720,12 @@ function buildRewriteRuleFromForm() {
     if (statusRaw) {
         const statusValue = Number.parseInt(statusRaw, 10);
         if (!Number.isInteger(statusValue) || statusValue <= 0) {
-            throw new Error("Status must be a positive integer.");
+            throw new Error(t("rewrites.errors.statusPositiveInteger"));
         }
         match.status = statusValue;
     }
 
-    const statuses = parseIntegerTokenList(dom.rewriteStatuses.value, "Statuses");
+    const statuses = parseIntegerTokenList(dom.rewriteStatuses.value, t("rewrites.fields.statuses"));
     if (statuses.length > 0) {
         match.statuses = statuses;
     }
@@ -1476,22 +1735,22 @@ function buildRewriteRuleFromForm() {
     const contentTypeRegex = dom.rewriteContentTypeRegex.value.trim();
     if (contentTypeRegex) match.content_type_regex = contentTypeRegex;
 
-    const reqHeaders = parseHeaderMap(dom.rewriteReqHeaders.value, "Request Header Contains");
+    const reqHeaders = parseHeaderMap(dom.rewriteReqHeaders.value, t("rewrites.fields.requestHeaderContains"));
     if (Object.keys(reqHeaders).length > 0) {
         match.request_header_contains = reqHeaders;
     }
-    const respHeaders = parseHeaderMap(dom.rewriteRespHeaders.value, "Response Header Contains");
+    const respHeaders = parseHeaderMap(dom.rewriteRespHeaders.value, t("rewrites.fields.responseHeaderContains"));
     if (Object.keys(respHeaders).length > 0) {
         match.response_header_contains = respHeaders;
     }
 
     const actions = {};
-    const setHeaders = parseHeaderMap(dom.rewriteSetHeaders.value, "Set Headers");
+    const setHeaders = parseHeaderMap(dom.rewriteSetHeaders.value, t("rewrites.fields.setHeaders"));
     if (Object.keys(setHeaders).length > 0) {
         actions.set_headers = setHeaders;
     }
 
-    const addHeaders = parseHeaderMap(dom.rewriteAddHeaders.value, "Add Headers");
+    const addHeaders = parseHeaderMap(dom.rewriteAddHeaders.value, t("rewrites.fields.addHeaders"));
     if (Object.keys(addHeaders).length > 0) {
         actions.add_headers = addHeaders;
     }
@@ -1501,20 +1760,20 @@ function buildRewriteRuleFromForm() {
         actions.del_headers = delHeaders;
     }
 
-    const replaceBody = parseReplacementLines(dom.rewriteBodyReplace.value, "from", "to")
+    const replaceBody = parseReplacementLines(dom.rewriteBodyReplace.value, t("rewrites.labels.from"), t("rewrites.labels.to"))
         .map((item) => ({ from: item.left, to: item.right }));
     if (replaceBody.length > 0) {
         actions.replace_body = replaceBody;
     }
 
-    const replaceBodyRegex = parseReplacementLines(dom.rewriteBodyRegex.value, "pattern", "replace")
+    const replaceBodyRegex = parseReplacementLines(dom.rewriteBodyRegex.value, t("rewrites.labels.pattern"), t("rewrites.labels.replace"))
         .map((item) => ({ pattern: item.left, replace: item.right }));
     if (replaceBodyRegex.length > 0) {
         actions.replace_body_regex = replaceBodyRegex;
     }
 
     if (Object.keys(actions).length === 0) {
-        throw new Error("At least one rewrite action is required.");
+        throw new Error(t("rewrites.errors.actionRequired"));
     }
 
     const rule = {
@@ -1551,7 +1810,7 @@ async function handleRewriteSave(event) {
 
     dom.rewriteSaveBtn.disabled = true;
     dom.rewriteDeleteBtn.disabled = true;
-    dom.rewriteSaveStatus.textContent = "Saving...";
+    dom.rewriteSaveStatus.textContent = t("rewrites.status.saving");
 
     try {
         let response;
@@ -1572,7 +1831,7 @@ async function handleRewriteSave(event) {
         }
         state.rewrites.dirty = false;
         await loadRewrites({ preserveForm: false, forceApply: true });
-        dom.rewriteSaveStatus.textContent = "Saved.";
+        dom.rewriteSaveStatus.textContent = t("rewrites.status.saved");
     } catch (error) {
         dom.rewriteSaveStatus.textContent = "";
         dom.rewriteFormError.textContent = error.message;
@@ -1596,13 +1855,13 @@ async function handleRewriteDelete() {
     if (!selected || !selected.managed) {
         return;
     }
-    if (!window.confirm(`Delete rewrite rule "${selected.rule && selected.rule.name ? selected.rule.name : selected.key}"?`)) {
+    if (!window.confirm(t("rewrites.deleteConfirm", { name: selected.rule && selected.rule.name ? selected.rule.name : selected.key }))) {
         return;
     }
 
     dom.rewriteDeleteBtn.disabled = true;
     dom.rewriteSaveBtn.disabled = true;
-    dom.rewriteSaveStatus.textContent = "Deleting...";
+    dom.rewriteSaveStatus.textContent = t("rewrites.status.deleting");
     dom.rewriteFormError.classList.add("hidden");
 
     try {
@@ -1612,7 +1871,7 @@ async function handleRewriteDelete() {
         state.rewrites.selectedKey = "new";
         state.rewrites.dirty = false;
         await loadRewrites({ preserveForm: false, forceApply: true });
-        dom.rewriteSaveStatus.textContent = "Deleted.";
+        dom.rewriteSaveStatus.textContent = t("rewrites.status.deleted");
     } catch (error) {
         dom.rewriteSaveStatus.textContent = "";
         dom.rewriteFormError.textContent = error.message;
@@ -1632,7 +1891,7 @@ async function handleRewriteClone() {
     }
 
     dom.rewriteCloneBtn.disabled = true;
-    dom.rewriteSaveStatus.textContent = "Cloning...";
+    dom.rewriteSaveStatus.textContent = t("rewrites.status.cloning");
     dom.rewriteFormError.classList.add("hidden");
 
     try {
@@ -1647,7 +1906,7 @@ async function handleRewriteClone() {
         }
         state.rewrites.dirty = false;
         await loadRewrites({ preserveForm: false, forceApply: true });
-        dom.rewriteSaveStatus.textContent = "Cloned.";
+        dom.rewriteSaveStatus.textContent = t("rewrites.status.cloned");
     } catch (error) {
         dom.rewriteSaveStatus.textContent = "";
         dom.rewriteFormError.textContent = error.message;
@@ -1673,7 +1932,7 @@ async function loadRewrites(options = {}) {
         if (!forceApply && state.rewrites.items.length > 0 && items.length === 0 && warning === "") {
             state.rewrites.transientEmptySkips += 1;
             if (state.rewrites.transientEmptySkips < 2) {
-                dom.rewriteSaveStatus.textContent = "Waiting for stable rewrite snapshot...";
+                dom.rewriteSaveStatus.textContent = t("rewrites.status.waitingForStableSnapshot");
                 return state.rewrites.rules;
             }
         } else {
@@ -1695,9 +1954,7 @@ async function loadRewrites(options = {}) {
 
         if (!unchanged || forceApply) {
             renderRewriteList();
-            dom.rewriteManagedFile.textContent = state.rewrites.managedFile
-                ? `managed file: ${state.rewrites.managedFile}`
-                : "managed file: -";
+            dom.rewriteManagedFile.textContent = formatManagedFileLabel(state.rewrites.managedFile);
 
             if (!preserveForm) {
                 renderRewriteEditor();
@@ -1706,13 +1963,13 @@ async function loadRewrites(options = {}) {
         }
 
         if (warning !== "") {
-            dom.rewriteSaveStatus.textContent = `Warning: ${warning}`;
+            dom.rewriteSaveStatus.textContent = t("rewrites.status.warning", { warning });
         } else if (!state.rewrites.dirty) {
             dom.rewriteSaveStatus.textContent = "";
         }
         return rules;
     } catch (_error) {
-        dom.rewriteSaveStatus.textContent = "Rewrite list refresh failed. Showing last loaded snapshot.";
+        dom.rewriteSaveStatus.textContent = t("rewrites.status.refreshFailed");
         return state.rewrites.rules;
     }
 }
@@ -1743,7 +2000,7 @@ function renderTraffic() {
     const items = state.traffic.items;
     clearElement(dom.trafficBody);
     if (!items.length) {
-        appendEmptyTableRow(dom.trafficBody, 7, "No captured traffic for this query.");
+        appendEmptyTableRow(dom.trafficBody, 7, t("traffic.empty"));
     } else {
         const fragment = document.createDocumentFragment();
         items.forEach((entry) => {
@@ -1760,7 +2017,7 @@ function renderTraffic() {
             const modeToken = normalizeClassToken(mode, "inspected");
             const modePill = document.createElement("span");
             modePill.className = `mode-pill mode-${modeToken}`;
-            modePill.textContent = mode;
+            modePill.textContent = formatTrafficMode(modeToken);
             modeCell.appendChild(modePill);
             row.appendChild(modeCell);
 
@@ -1797,7 +2054,13 @@ function renderTraffic() {
 
     const start = state.traffic.total === 0 ? 0 : state.traffic.offset + 1;
     const end = Math.min(state.traffic.offset + state.traffic.limit, state.traffic.total);
-    dom.trafficSummary.textContent = `${start}-${end} of ${state.traffic.total.toLocaleString()} results`;
+    dom.trafficSummary.textContent = state.traffic.total === 0
+        ? t("traffic.summaryEmpty")
+        : t("traffic.summaryRange", {
+            start,
+            end,
+            total: state.traffic.total.toLocaleString(currentLocaleCode()),
+        });
 
     dom.prevPageBtn.disabled = state.traffic.offset === 0;
     dom.nextPageBtn.disabled = state.traffic.offset + state.traffic.limit >= state.traffic.total;
@@ -1809,7 +2072,7 @@ async function showTrafficDetail(id) {
         const content = document.createDocumentFragment();
 
         const requestTitle = document.createElement("h5");
-        requestTitle.textContent = "Request";
+        requestTitle.textContent = t("traffic.request");
         content.appendChild(requestTitle);
 
         const requestPre = document.createElement("pre");
@@ -1817,19 +2080,19 @@ async function showTrafficDetail(id) {
         content.appendChild(requestPre);
 
         const responseTitle = document.createElement("h5");
-        responseTitle.textContent = "Response";
+        responseTitle.textContent = t("traffic.response");
         content.appendChild(responseTitle);
 
         const responsePre = document.createElement("pre");
         responsePre.textContent = `${detail.response_full || ""}${detail.response_body ? "\n\n" + detail.response_body : ""}`;
         content.appendChild(responsePre);
 
-        openModal(`Traffic #${id}`, content);
+        openModal(t("traffic.detailTitle", { id }), content);
     } catch (error) {
         const errorNode = document.createElement("p");
         errorNode.className = "form-error";
         errorNode.textContent = error.message;
-        openModal("Traffic Detail", errorNode);
+        openModal(t("traffic.detailModalTitle"), errorNode);
     }
 }
 
@@ -1865,14 +2128,14 @@ async function loadUsers() {
 function renderUsers() {
     clearElement(dom.usersBody);
     if (!state.users.length) {
-        appendEmptyTableRow(dom.usersBody, 6, "No users available.");
+        appendEmptyTableRow(dom.usersBody, 6, t("users.empty"));
         return;
     }
 
     const fragment = document.createDocumentFragment();
     state.users.forEach((user) => {
         const row = document.createElement("tr");
-        const stateLabel = user.is_active ? "Active" : "Disabled";
+        const stateLabel = user.is_active ? t("users.state.active") : t("users.state.disabled");
 
         const usernameCell = document.createElement("td");
         usernameCell.textContent = String(user.username || "");
@@ -1883,7 +2146,7 @@ function renderUsers() {
         row.appendChild(displayNameCell);
 
         const roleCell = document.createElement("td");
-        roleCell.textContent = String(user.role || "");
+        roleCell.textContent = formatRole(user.role);
         row.appendChild(roleCell);
 
         const stateCell = document.createElement("td");
@@ -1891,7 +2154,7 @@ function renderUsers() {
         row.appendChild(stateCell);
 
         const lastLoginCell = document.createElement("td");
-        lastLoginCell.textContent = user.last_login_at ? formatTime(user.last_login_at) : "Never";
+        lastLoginCell.textContent = user.last_login_at ? formatTime(user.last_login_at) : t("users.lastLoginNever");
         row.appendChild(lastLoginCell);
 
         const actionsCell = document.createElement("td");
@@ -1905,7 +2168,7 @@ function renderUsers() {
         editButton.className = "btn btn-ghost";
         editButton.dataset.action = "edit";
         editButton.dataset.id = userID;
-        editButton.textContent = "Edit";
+        editButton.textContent = t("actions.edit");
         actionsWrap.appendChild(editButton);
 
         const deleteButton = document.createElement("button");
@@ -1913,7 +2176,7 @@ function renderUsers() {
         deleteButton.className = "btn btn-ghost";
         deleteButton.dataset.action = "delete";
         deleteButton.dataset.id = userID;
-        deleteButton.textContent = "Delete";
+        deleteButton.textContent = t("actions.delete");
         actionsWrap.appendChild(deleteButton);
 
         actionsCell.appendChild(actionsWrap);
@@ -1938,8 +2201,8 @@ function beginEditUser(userID) {
     dom.userPassword.value = "";
     dom.userPassword.required = false;
     dom.userActive.checked = !!target.is_active;
-    dom.userFormTitle.textContent = `Edit User: ${target.username}`;
-    dom.userSubmit.textContent = "Update User";
+    dom.userFormTitle.textContent = t("users.form.editTitle", { username: target.username });
+    dom.userSubmit.textContent = t("users.form.submitUpdate");
     dom.cancelEditBtn.classList.remove("hidden");
     dom.userFormError.classList.add("hidden");
 }
@@ -1953,8 +2216,8 @@ function resetUserForm() {
     dom.userPassword.value = "";
     dom.userPassword.required = true;
     dom.userActive.checked = true;
-    dom.userFormTitle.textContent = "Create User";
-    dom.userSubmit.textContent = "Create User";
+    dom.userFormTitle.textContent = t("users.form.createTitle");
+    dom.userSubmit.textContent = t("users.form.submitCreate");
     dom.cancelEditBtn.classList.add("hidden");
     dom.userFormError.classList.add("hidden");
 }
@@ -2018,7 +2281,7 @@ async function deleteUser(userID) {
         return;
     }
 
-    if (!window.confirm(`Delete user ${target.username}?`)) {
+    if (!window.confirm(t("users.deleteConfirm", { username: target.username }))) {
         return;
     }
 

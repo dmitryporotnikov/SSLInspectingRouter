@@ -4,34 +4,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSL Inspecting Router Console</title>
+    <title></title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
 </head>
 
-<body class="login-mode">
+<body class="login-mode" data-i18n-state="loading">
     <div class="background-layer" aria-hidden="true"></div>
 
     <section id="login-view" class="auth-view">
         <div class="auth-panel panel">
-            <p class="eyebrow">Operations</p>
-            <h1>SSL Inspecting Router</h1>
-            <p class="muted">Sign in to access traffic analytics, inspection controls, and user administration.</p>
+            <div class="auth-panel-header">
+                <div>
+                    <p class="eyebrow" data-i18n="login.eyebrow"></p>
+                    <h1>SSL Inspecting Router</h1>
+                </div>
+                <label class="language-picker inline-language-picker">
+                    <span data-i18n="language.label"></span>
+                    <select id="login-language-select" data-language-select></select>
+                </label>
+            </div>
+            <p class="muted" data-i18n="login.subtitle"></p>
             <form id="login-form" class="auth-form">
                 <label>
-                    Username
+                    <span data-i18n="login.username"></span>
                     <input type="text" id="login-username" autocomplete="username" required>
                 </label>
                 <label>
-                    Password
+                    <span data-i18n="login.password"></span>
                     <input type="password" id="login-password" autocomplete="current-password" required>
                 </label>
-                <button type="submit" class="btn btn-primary">Sign In</button>
+                <button type="submit" class="btn btn-primary" data-i18n="login.submit"></button>
                 <p id="login-error" class="form-error hidden"></p>
             </form>
-            <p class="auth-footnote">Default bootstrap credentials: <code>admin / admin123</code></p>
+            <p class="auth-footnote" data-i18n-html="login.defaultCredentialsHtml"></p>
         </div>
     </section>
 
@@ -39,81 +47,81 @@
         <aside class="sidebar panel">
             <div>
                 <p class="eyebrow">SSLInspectingRouter</p>
-                <h2>Operations Console</h2>
+                <h2 data-i18n="sidebar.title"></h2>
             </div>
 
             <nav class="nav-list">
-                <button type="button" data-section="traffic" class="nav-item active">Traffic</button>
-                <button type="button" data-section="rewrites" class="nav-item">Rewrites</button>
-                <button type="button" data-section="users" class="nav-item" id="users-nav">Users</button>
+                <button type="button" data-section="traffic" class="nav-item active" data-i18n="nav.traffic"></button>
+                <button type="button" data-section="rewrites" class="nav-item" data-i18n="nav.rewrites"></button>
+                <button type="button" data-section="users" class="nav-item" id="users-nav" data-i18n="nav.users"></button>
             </nav>
 
             <div class="sidebar-meta">
                 <div class="meta-row">
-                    <span>Rules Loaded</span>
+                    <span data-i18n="sidebar.rulesLoaded"></span>
                     <strong id="rewrite-count">0</strong>
                 </div>
                 <div class="meta-row" id="body-artifacts-meta">
-                    <span>Body Artifacts</span>
-                    <strong id="body-artifacts-dir" class="meta-value">disabled</strong>
+                    <span data-i18n="sidebar.bodyArtifacts"></span>
+                    <strong id="body-artifacts-dir" class="meta-value">-</strong>
                 </div>
                 <div class="meta-row">
-                    <span>Drop Entries</span>
+                    <span data-i18n="sidebar.dropEntries"></span>
                     <strong id="drop-list-count">0</strong>
                 </div>
                 <div class="meta-row">
-                    <span>Bypass Entries</span>
+                    <span data-i18n="sidebar.bypassEntries"></span>
                     <strong id="bypass-list-count">0</strong>
                 </div>
-                <button type="button" class="btn btn-ghost" id="view-rules-btn">Open Rewrite Studio</button>
+                <button type="button" class="btn btn-ghost" id="view-rules-btn" data-i18n="sidebar.openRewriteStudio"></button>
             </div>
 
             <section id="settings-panel" class="settings-panel hidden">
                 <div class="settings-header">
-                    <h3>Control Center</h3>
-                    <p>Live routing controls and policy management.</p>
+                    <h3 data-i18n="settings.title"></h3>
+                    <p data-i18n="settings.subtitle"></p>
                 </div>
 
                 <div class="settings-group compact-group">
-                    <h4>Runtime</h4>
+                    <h4 data-i18n="settings.runtime"></h4>
                     <div class="control-list">
                         <div class="switch-wrap compact-switch" id="inspection-control-wrap">
-                            <span>Inspection</span>
+                            <span data-i18n="settings.inspection"></span>
                             <label class="switch">
                                 <input type="checkbox" id="inspection-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="truncate-log-wrap">
-                            <span>Truncate Log Bodies</span>
+                            <span data-i18n="settings.truncateLogBodies"></span>
                             <label class="switch">
                                 <input type="checkbox" id="truncate-log-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="log-nothing-wrap">
-                            <span>Log Nothing</span>
+                            <span data-i18n="settings.logNothing"></span>
                             <label class="switch">
                                 <input type="checkbox" id="log-nothing-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="wireguard-wrap">
-                            <span>WireGuard Egress</span>
+                            <span data-i18n="settings.wireguardEgress"></span>
                             <label class="switch">
                                 <input type="checkbox" id="wireguard-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="tor-wrap">
-                            <span>Tor Egress</span>
+                            <span data-i18n="settings.torEgress"></span>
                             <label class="switch">
                                 <input type="checkbox" id="tor-toggle">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
-                            <span>Body Artifacts</span>
+                            <span data-i18n="settings.bodyArtifacts"></span>
                             <label class="switch">
                                 <input type="checkbox" id="body-artifacts-toggle">
                                 <span class="slider"></span>
@@ -123,81 +131,81 @@
                 </div>
 
                 <details class="settings-fold" open>
-                    <summary>Artifact Storage Path</summary>
+                    <summary data-i18n="settings.artifactStoragePath"></summary>
                     <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
-                        <input type="text" id="body-artifacts-directory-input" placeholder="Artifact directory">
-                        <button type="button" class="btn btn-ghost" id="body-artifacts-save">Set Path</button>
+                        <input type="text" id="body-artifacts-directory-input" data-i18n-placeholder="settings.artifactDirectoryPlaceholder">
+                        <button type="button" class="btn btn-ghost" id="body-artifacts-save" data-i18n="settings.setPath"></button>
                     </div>
                 </details>
 
                 <details class="settings-fold" open>
-                    <summary>WireGuard Client Config</summary>
-                    <p class="muted settings-note">Paste a client config or place a <code>.conf</code> file in the project <code>wireguard/</code> directory.</p>
+                    <summary data-i18n="settings.wireguardClientConfig"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.wireguardNoteHtml"></p>
                     <textarea id="wireguard-config-input" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;AllowedIPs = 0.0.0.0/0"></textarea>
                     <div class="policy-actions">
-                        <button type="button" class="btn btn-ghost" id="wireguard-config-save">Save WireGuard Config</button>
+                        <button type="button" class="btn btn-ghost" id="wireguard-config-save" data-i18n="settings.saveWireGuardConfig"></button>
                         <span class="muted" id="wireguard-config-status"></span>
                     </div>
                     <div class="meta-row">
-                        <span>Tunnel</span>
-                        <strong id="wireguard-meta-value" class="meta-value">inactive</strong>
+                        <span data-i18n="settings.tunnel"></span>
+                        <strong id="wireguard-meta-value" class="meta-value">-</strong>
                     </div>
                 </details>
 
                 <details class="settings-fold" open>
-                    <summary>Tor Egress</summary>
-                    <p class="muted settings-note">Requires Tor SOCKS endpoint (default <code>127.0.0.1:9050</code>).</p>
+                    <summary data-i18n="settings.torSection"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.torNoteHtml"></p>
                     <div class="meta-row">
-                        <span>Tor Route</span>
-                        <strong id="tor-meta-value" class="meta-value">inactive</strong>
+                        <span data-i18n="settings.torRoute"></span>
+                        <strong id="tor-meta-value" class="meta-value">-</strong>
                     </div>
                     <span class="muted" id="tor-status"></span>
                 </details>
 
                 <details id="policy-controls" class="settings-fold policy-panel">
-                    <summary>Traffic Policy</summary>
-                    <p class="muted policy-hint">One per line or comma-separated. Supports domains, IPs, and CIDRs.</p>
+                    <summary data-i18n="settings.trafficPolicy"></summary>
+                    <p class="muted policy-hint" data-i18n="settings.trafficPolicyHint"></p>
                     <div class="policy-grid">
                         <label>
-                            Drop List
+                            <span data-i18n="settings.dropList"></span>
                             <textarea id="drop-list-input" placeholder="example.com&#10;203.0.113.10&#10;10.10.0.0/16"></textarea>
                         </label>
                         <label>
-                            Bypass List
+                            <span data-i18n="settings.bypassList"></span>
                             <textarea id="bypass-list-input" placeholder="internal.example.com&#10;198.51.100.42"></textarea>
                         </label>
                     </div>
                     <div class="policy-actions">
-                        <button type="button" class="btn btn-primary" id="policy-save-btn">Save Policy</button>
+                        <button type="button" class="btn btn-primary" id="policy-save-btn" data-i18n="settings.savePolicy"></button>
                         <span class="muted" id="policy-save-status"></span>
                     </div>
                 </details>
 
                 <details class="settings-fold">
-                    <summary>Startup Profile</summary>
-                    <p class="muted settings-note">Visibility only. Changes require restart.</p>
+                    <summary data-i18n="settings.startupProfile"></summary>
+                    <p class="muted settings-note" data-i18n="settings.startupProfileNote"></p>
                     <div class="meta-row">
-                        <span>Allow QUIC</span>
+                        <span data-i18n="settings.allowQuic"></span>
                         <strong id="allow-quic-value">-</strong>
                     </div>
                     <div class="meta-row">
-                        <span>TLS Ports</span>
-                        <strong id="tls-ports-value" class="meta-value">default</strong>
+                        <span data-i18n="settings.tlsPorts"></span>
+                        <strong id="tls-ports-value" class="meta-value">-</strong>
                     </div>
                     <div class="meta-row">
-                        <span>Inspect-Only</span>
-                        <strong id="inspect-only-value" class="meta-value">all sources</strong>
+                        <span data-i18n="settings.inspectOnly"></span>
+                        <strong id="inspect-only-value" class="meta-value">-</strong>
                     </div>
                     <div class="meta-row">
-                        <span>PCAP Path</span>
-                        <strong id="pcap-path-value" class="meta-value">disabled</strong>
+                        <span data-i18n="settings.pcapPath"></span>
+                        <strong id="pcap-path-value" class="meta-value">-</strong>
                     </div>
                     <div class="meta-row">
-                        <span>Current Egress</span>
+                        <span data-i18n="settings.currentEgress"></span>
                         <strong id="egress-interface-value" class="meta-value">-</strong>
                     </div>
                     <div class="meta-row">
-                        <span>Default Egress</span>
+                        <span data-i18n="settings.defaultEgress"></span>
                         <strong id="default-egress-interface-value" class="meta-value">-</strong>
                     </div>
                 </details>
@@ -208,42 +216,46 @@
             <header class="topbar panel">
                 <div class="status-grid">
                     <article>
-                        <p class="metric-label">Connection</p>
-                        <p class="metric-value" id="metric-connection">Connected</p>
+                        <p class="metric-label" data-i18n="metrics.connectionLabel"></p>
+                        <p class="metric-value" id="metric-connection">-</p>
                     </article>
                     <article>
-                        <p class="metric-label">Database Size</p>
+                        <p class="metric-label" data-i18n="metrics.databaseSizeLabel"></p>
                         <p class="metric-value" id="metric-db-size">-</p>
                     </article>
                     <article>
-                        <p class="metric-label">Captured Requests</p>
+                        <p class="metric-label" data-i18n="metrics.capturedRequestsLabel"></p>
                         <p class="metric-value" id="metric-requests">-</p>
                     </article>
                 </div>
 
                 <div class="topbar-actions">
+                    <label class="language-picker inline-language-picker topbar-language-picker">
+                        <span data-i18n="language.label"></span>
+                        <select id="app-language-select" data-language-select></select>
+                    </label>
                     <div class="user-block">
                         <span id="current-user">-</span>
                         <small id="current-role">-</small>
                     </div>
-                    <button type="button" class="btn btn-ghost theme-toggle" id="theme-toggle" title="Switch theme" aria-label="Switch theme">
+                    <button type="button" class="btn btn-ghost theme-toggle" id="theme-toggle">
                         <span id="theme-toggle-icon" aria-hidden="true">☾</span>
                     </button>
-                    <button type="button" class="btn btn-ghost" id="logout-btn">Logout</button>
+                    <button type="button" class="btn btn-ghost" id="logout-btn" data-i18n="actions.logout"></button>
                 </div>
             </header>
 
             <section id="traffic-section" class="panel section-view">
                 <div class="section-header">
-                    <h3>Traffic Monitor</h3>
+                    <h3 data-i18n="traffic.title"></h3>
                     <div class="section-actions">
-                        <input type="text" id="traffic-search" placeholder="Search host, source IP, status...">
+                        <input type="text" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder">
                         <select id="traffic-mode-filter">
-                            <option value="">All Modes</option>
-                            <option value="inspected">Inspected</option>
-                            <option value="paused">Inspection Paused</option>
-                            <option value="bypassed">Bypassed</option>
-                            <option value="blocked">Blocked</option>
+                            <option value="" data-i18n="traffic.modes.all"></option>
+                            <option value="inspected" data-i18n="traffic.modes.inspected"></option>
+                            <option value="paused" data-i18n="traffic.modes.paused"></option>
+                            <option value="bypassed" data-i18n="traffic.modes.bypassed"></option>
+                            <option value="blocked" data-i18n="traffic.modes.blocked"></option>
                         </select>
                         <select id="traffic-limit">
                             <option value="25">25</option>
@@ -251,8 +263,8 @@
                             <option value="100">100</option>
                             <option value="200">200</option>
                         </select>
-                        <button type="button" class="btn btn-ghost" id="refresh-btn">Refresh</button>
-                        <button type="button" class="btn btn-ghost" id="flush-traffic-btn">Flush Traffic</button>
+                        <button type="button" class="btn btn-ghost" id="refresh-btn" data-i18n="actions.refresh"></button>
+                        <button type="button" class="btn btn-ghost" id="flush-traffic-btn" data-i18n="traffic.flush"></button>
                     </div>
                 </div>
 
@@ -260,13 +272,13 @@
                     <table class="traffic-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Mode</th>
-                                <th>Method</th>
-                                <th>Host</th>
-                                <th>URL</th>
-                                <th>Source</th>
-                                <th>Status</th>
+                                <th data-i18n="traffic.table.time"></th>
+                                <th data-i18n="traffic.table.mode"></th>
+                                <th data-i18n="traffic.table.method"></th>
+                                <th data-i18n="traffic.table.host"></th>
+                                <th data-i18n="traffic.table.url"></th>
+                                <th data-i18n="traffic.table.source"></th>
+                                <th data-i18n="traffic.table.status"></th>
                             </tr>
                         </thead>
                         <tbody id="traffic-table-body"></tbody>
@@ -274,28 +286,28 @@
                 </div>
 
                 <div class="pager-row">
-                    <div id="traffic-summary" class="muted">0 results</div>
+                    <div id="traffic-summary" class="muted"></div>
                     <div class="pager-controls">
-                        <button type="button" class="btn btn-ghost" id="prev-page">Previous</button>
-                        <button type="button" class="btn btn-ghost" id="next-page">Next</button>
+                        <button type="button" class="btn btn-ghost" id="prev-page" data-i18n="pagination.previous"></button>
+                        <button type="button" class="btn btn-ghost" id="next-page" data-i18n="pagination.next"></button>
                     </div>
                 </div>
             </section>
 
             <section id="rewrites-section" class="panel section-view hidden">
                 <div class="section-header">
-                    <h3>Rewrite Policy Studio</h3>
+                    <h3 data-i18n="rewrites.title"></h3>
                     <div class="section-actions">
-                        <button type="button" class="btn btn-ghost" id="rewrite-new-btn">New Rule</button>
-                        <button type="button" class="btn btn-ghost" id="rewrite-reload-btn">Reload</button>
+                        <button type="button" class="btn btn-ghost" id="rewrite-new-btn" data-i18n="rewrites.newRule"></button>
+                        <button type="button" class="btn btn-ghost" id="rewrite-reload-btn" data-i18n="rewrites.reload"></button>
                     </div>
                 </div>
 
                 <div class="rewrites-layout">
                     <div class="rewrite-list-wrap">
                         <div class="rewrite-list-header">
-                            <span>Loaded Rules</span>
-                            <small id="rewrite-managed-file" class="muted">managed file: -</small>
+                            <span data-i18n="rewrites.loadedRules"></span>
+                            <small id="rewrite-managed-file" class="muted"></small>
                         </div>
                         <div id="rewrite-list" class="rewrite-list"></div>
                     </div>
@@ -303,97 +315,97 @@
                     <form id="rewrite-form" class="rewrite-form">
                         <div class="rewrite-form-head">
                             <div>
-                                <h4 id="rewrite-form-title">New Rewrite Rule</h4>
-                                <p id="rewrite-form-origin" class="muted">Managed rule</p>
+                                <h4 id="rewrite-form-title"></h4>
+                                <p id="rewrite-form-origin" class="muted"></p>
                             </div>
                             <label class="checkbox-row rewrite-enabled-row">
                                 <input type="checkbox" id="rewrite-enabled" checked>
-                                Enabled
+                                <span data-i18n="rewrites.fields.enabled"></span>
                             </label>
                         </div>
 
                         <div class="rewrite-grid">
                             <label>
-                                Rule Name
+                                <span data-i18n="rewrites.fields.ruleName"></span>
                                 <input type="text" id="rewrite-name" placeholder="inject-debug-header" required>
                             </label>
                             <label>
-                                Match Host
+                                <span data-i18n="rewrites.fields.matchHost"></span>
                                 <input type="text" id="rewrite-host" placeholder="example.com">
                             </label>
                             <label>
-                                Match Host Regex
+                                <span data-i18n="rewrites.fields.matchHostRegex"></span>
                                 <input type="text" id="rewrite-host-regex" placeholder="(^|\\.)example\\.com$">
                             </label>
                             <label>
-                                Path Prefix
+                                <span data-i18n="rewrites.fields.pathPrefix"></span>
                                 <input type="text" id="rewrite-path-prefix" placeholder="/api/v1/">
                             </label>
                             <label>
-                                Path Regex
+                                <span data-i18n="rewrites.fields.pathRegex"></span>
                                 <input type="text" id="rewrite-path-regex" placeholder="^/v[0-9]+/">
                             </label>
                             <label>
-                                Method
+                                <span data-i18n="rewrites.fields.method"></span>
                                 <input type="text" id="rewrite-method" placeholder="GET">
                             </label>
                             <label>
-                                Methods (comma/newline)
+                                <span data-i18n="rewrites.fields.methods"></span>
                                 <input type="text" id="rewrite-methods" placeholder="GET,POST">
                             </label>
                             <label>
-                                Status
+                                <span data-i18n="rewrites.fields.status"></span>
                                 <input type="text" id="rewrite-status" placeholder="200">
                             </label>
                             <label>
-                                Statuses (comma/newline)
+                                <span data-i18n="rewrites.fields.statuses"></span>
                                 <input type="text" id="rewrite-statuses" placeholder="200,204,206">
                             </label>
                             <label>
-                                Content-Type Contains
+                                <span data-i18n="rewrites.fields.contentTypeContains"></span>
                                 <input type="text" id="rewrite-content-type-contains" placeholder="text/html">
                             </label>
                             <label>
-                                Content-Type Regex
+                                <span data-i18n="rewrites.fields.contentTypeRegex"></span>
                                 <input type="text" id="rewrite-content-type-regex" placeholder="text/(html|plain)">
                             </label>
                             <label>
-                                Delete Headers (comma/newline)
+                                <span data-i18n="rewrites.fields.deleteHeaders"></span>
                                 <input type="text" id="rewrite-del-headers" placeholder="Server, X-Powered-By">
                             </label>
                         </div>
 
                         <div class="rewrite-grid rewrite-text-grid">
                             <label>
-                                Request Header Contains
-                                <textarea id="rewrite-req-headers" placeholder="Header-Name: value"></textarea>
+                                <span data-i18n="rewrites.fields.requestHeaderContains"></span>
+                                <textarea id="rewrite-req-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
                             </label>
                             <label>
-                                Response Header Contains
-                                <textarea id="rewrite-resp-headers" placeholder="Header-Name: value"></textarea>
+                                <span data-i18n="rewrites.fields.responseHeaderContains"></span>
+                                <textarea id="rewrite-resp-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
                             </label>
                             <label>
-                                Set Headers
-                                <textarea id="rewrite-set-headers" placeholder="Header-Name: value"></textarea>
+                                <span data-i18n="rewrites.fields.setHeaders"></span>
+                                <textarea id="rewrite-set-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
                             </label>
                             <label>
-                                Add Headers
-                                <textarea id="rewrite-add-headers" placeholder="Header-Name: value"></textarea>
+                                <span data-i18n="rewrites.fields.addHeaders"></span>
+                                <textarea id="rewrite-add-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
                             </label>
                             <label>
-                                Body Replace
-                                <textarea id="rewrite-body-replace" placeholder="from => to"></textarea>
+                                <span data-i18n="rewrites.fields.bodyReplace"></span>
+                                <textarea id="rewrite-body-replace" data-i18n-placeholder="rewrites.placeholders.replaceBody"></textarea>
                             </label>
                             <label>
-                                Body Regex Replace
-                                <textarea id="rewrite-body-regex" placeholder="pattern => replacement"></textarea>
+                                <span data-i18n="rewrites.fields.bodyRegexReplace"></span>
+                                <textarea id="rewrite-body-regex" data-i18n-placeholder="rewrites.placeholders.replaceBodyRegex"></textarea>
                             </label>
                         </div>
 
                         <div class="rewrite-actions">
-                            <button type="submit" class="btn btn-primary" id="rewrite-save-btn">Save Rule</button>
-                            <button type="button" class="btn btn-ghost" id="rewrite-delete-btn">Delete Rule</button>
-                            <button type="button" class="btn btn-ghost hidden" id="rewrite-clone-btn">Clone to Managed</button>
+                            <button type="submit" class="btn btn-primary" id="rewrite-save-btn" data-i18n="rewrites.saveRule"></button>
+                            <button type="button" class="btn btn-ghost" id="rewrite-delete-btn" data-i18n="rewrites.deleteRule"></button>
+                            <button type="button" class="btn btn-ghost hidden" id="rewrite-clone-btn" data-i18n="rewrites.cloneToManaged"></button>
                             <span class="muted" id="rewrite-save-status"></span>
                         </div>
 
@@ -404,19 +416,19 @@
 
             <section id="users-section" class="panel section-view hidden">
                 <div class="section-header">
-                    <h3>User Management</h3>
-                    <button type="button" class="btn btn-ghost" id="reload-users-btn">Reload</button>
+                    <h3 data-i18n="users.title"></h3>
+                    <button type="button" class="btn btn-ghost" id="reload-users-btn" data-i18n="rewrites.reload"></button>
                 </div>
 
                 <div class="table-wrap users-table-wrap">
                     <table>
                         <thead>
                             <tr>
-                                <th>Username</th>
-                                <th>Display Name</th>
-                                <th>Role</th>
-                                <th>State</th>
-                                <th>Last Login</th>
+                                <th data-i18n="users.table.username"></th>
+                                <th data-i18n="users.table.displayName"></th>
+                                <th data-i18n="users.table.role"></th>
+                                <th data-i18n="users.table.state"></th>
+                                <th data-i18n="users.table.lastLogin"></th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -425,37 +437,37 @@
                 </div>
 
                 <form id="user-form" class="user-form">
-                    <h4 id="user-form-title">Create User</h4>
+                    <h4 id="user-form-title"></h4>
                     <input type="hidden" id="user-id">
                     <div class="user-grid">
                         <label>
-                            Username
+                            <span data-i18n="users.form.username"></span>
                             <input id="user-username" type="text" placeholder="analyst-1" required>
                         </label>
                         <label>
-                            Display Name
-                            <input id="user-display-name" type="text" placeholder="Operations Analyst" required>
+                            <span data-i18n="users.form.displayName"></span>
+                            <input id="user-display-name" type="text" data-i18n-placeholder="users.form.displayNamePlaceholder" required>
                         </label>
                         <label>
-                            Role
+                            <span data-i18n="users.form.role"></span>
                             <select id="user-role">
-                                <option value="viewer">Viewer</option>
-                                <option value="operator">Operator</option>
-                                <option value="admin">Admin</option>
+                                <option value="viewer" data-i18n="roles.viewer"></option>
+                                <option value="operator" data-i18n="roles.operator"></option>
+                                <option value="admin" data-i18n="roles.admin"></option>
                             </select>
                         </label>
                         <label>
-                            Password
-                            <input id="user-password" type="password" placeholder="Minimum 8 characters" required>
+                            <span data-i18n="users.form.password"></span>
+                            <input id="user-password" type="password" data-i18n-placeholder="users.form.passwordPlaceholder" required>
                         </label>
                         <label class="checkbox-row">
                             <input id="user-active" type="checkbox" checked>
-                            Active
+                            <span data-i18n="users.form.active"></span>
                         </label>
                     </div>
                     <div class="user-form-actions">
-                        <button type="submit" class="btn btn-primary" id="user-submit">Create User</button>
-                        <button type="button" class="btn btn-ghost hidden" id="cancel-edit">Cancel Edit</button>
+                        <button type="submit" class="btn btn-primary" id="user-submit"></button>
+                        <button type="button" class="btn btn-ghost hidden" id="cancel-edit" data-i18n="users.form.cancelEdit"></button>
                     </div>
                     <p id="user-form-error" class="form-error hidden"></p>
                 </form>
@@ -466,8 +478,8 @@
     <div id="modal" class="modal hidden">
         <div class="modal-card panel">
             <div class="modal-header">
-                <h4 id="modal-title">Details</h4>
-                <button type="button" class="btn btn-ghost" id="modal-close">Close</button>
+                <h4 id="modal-title"></h4>
+                <button type="button" class="btn btn-ghost" id="modal-close" data-i18n="actions.close"></button>
             </div>
             <div id="modal-content" class="modal-content"></div>
         </div>

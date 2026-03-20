@@ -187,6 +187,7 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
+	mux.HandleFunc("/api/v1/localization/languages", s.handleLocalizationLanguages)
 	mux.HandleFunc("/api/v1/auth/login", s.handleAuthLogin)
 	mux.Handle("/api/v1/auth/logout", s.withAuth(http.HandlerFunc(s.handleAuthLogout)))
 	mux.Handle("/api/v1/auth/me", s.withAuth(http.HandlerFunc(s.handleAuthMe)))
