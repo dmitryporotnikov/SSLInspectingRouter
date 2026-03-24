@@ -4,6 +4,9 @@
 
 A transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It uses the kernel packet filtering framework to redirect web traffic to local userspace listeners for inspection, logging, and optional content modification.
 
+# Extra contributors:
+A special thank you to [@ankit20012006](https://github.com/ankit20012006) and [@Anand-240](https://github.com/Anand-240) for their localization contributions.
+
 ## Features
 
 - **Transparent HTTP/HTTPS interception** - Redirects traffic using iptables NAT
