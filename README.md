@@ -2,23 +2,23 @@
 
 ![Banner](banner.jpg)
 
-A transparent interception proxy written in Go for HTTP and HTTPS traffic on Linux. It uses the kernel packet filtering framework to redirect web traffic to local userspace listeners for inspection, logging, and optional content modification.
+A transparent interception proxy for HTTP and HTTPS traffic on Linux. It redirects traffic using iptables NAT, intercepts it locally for inspection, logging, and optional content modification.
 
-# Extra contributors:
-A special thank you to [@ankit20012006](https://github.com/ankit20012006) and [@Anand-240](https://github.com/Anand-240) for their localization contributions.
+## Extra contributors
+Thanks to [@ankit20012006](https://github.com/ankit20012006) and [@Anand-240](https://github.com/Anand-240) for localization contributions.
 
 ## Features
 
-- **Transparent HTTP/HTTPS interception** - Redirects traffic using iptables NAT
-- **TLS/SSL MITM** - Dynamically generates certificates for intercepted connections
-- **SQLite traffic logging** - Full request/response capture with search
-- **Web Dashboard** - Real-time traffic view, policy management, rewrite rules
-- **WireGuard Egress** - Route traffic through WireGuard tunnels (runtime toggleable)
-- **Tor Egress** - Route traffic through Tor SOCKS5 proxy (runtime toggleable)
-- **Response Rewriting** - Modify HTTP/HTTPS responses on the fly with JSON rules
-- **PCAP Export** - Export decrypted traffic for Wireshark analysis
-- **Content Blocking** - Drop or bypass inspection by domain/IP/CIDR
-- **Allowlist Mode** - Only inspect traffic from specific source IPs
+- Transparent HTTP/HTTPS interception using iptables NAT
+- TLS/SSL MITM with dynamically generated certificates
+- SQLite traffic logging with full request/response capture
+- Web dashboard for real-time traffic viewing and policy management
+- WireGuard egress support (runtime toggleable)
+- Tor egress support (runtime toggleable)
+- Response rewriting with JSON rules
+- PCAP export for Wireshark analysis
+- Content blocking by domain, IP, or CIDR
+- Allowlist mode to only inspect traffic from specific source IPs
 
 > **⚠️ Security Warning:** This tool performs TLS/SSL interception (MITM). Only use in controlled environments you own. Always change default credentials.
 
