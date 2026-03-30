@@ -1,7 +1,7 @@
 package pcap
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"math/rand"
 	"net"
 	"strconv"
@@ -49,7 +49,7 @@ func Close() {
 
 // Map FQDN to a consistent fake IP (10.200.x.x)
 func resolveFakeIP(fqdn string) net.IP {
-	hash := md5.Sum([]byte(fqdn))
+	hash := sha256.Sum256([]byte(fqdn))
 	// Use 2nd and 3rd bytes of hash for x.y
 	return net.IPv4(10, 200, hash[1], hash[2])
 }

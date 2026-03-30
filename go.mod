@@ -1,6 +1,6 @@
 module github.com/dmitryporotnikov/sslinspectingrouter
 
-go 1.26.1
+go 1.24.0
 
 require golang.org/x/net v0.24.0
 
