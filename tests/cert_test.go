@@ -1,8 +1,9 @@
-package cert
+package tests
 
 import (
 	"net"
 	"os"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
 	"testing"
 )
 
@@ -19,9 +20,9 @@ func TestGetCertificateForHostAddsIPSANForIPAddress(t *testing.T) {
 		_ = os.Chdir(cwd)
 	})
 
-	cm, err := NewCertManager(true)
+	cm, err := cert.NewCertManager(true)
 	if err != nil {
-		t.Fatalf("NewCertManager failed: %v", err)
+		t.Fatalf("cert.NewCertManager failed: %v", err)
 	}
 
 	targetIP := net.ParseIP("188.225.32.161")
