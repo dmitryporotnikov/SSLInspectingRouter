@@ -392,7 +392,6 @@ Legacy aliases are still available for old clients:
 
 * `/api/status`
 * `/api/policy`
-* `/api/traffic`
 * `/api/rewrites`
 
 ### Database Schema

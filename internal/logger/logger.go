@@ -447,15 +447,34 @@ func LogHTTPSRequest(entry RequestLogEntry) int64 {
 	return id
 }
 
+// ResponseLogEntry encapsulates the parameters for logging an HTTP/HTTPS response.
+type ResponseLogEntry struct {
+	ReqID       int64
+	SourceIP    string
+	FQDN        string
+	Status      string
+	Headers     http.Header
+	BodyPreview []byte
+	Truncated   bool
+}
+
 // LogHTTPResponse writes HTTP response details to SQLite.
 func LogHTTPResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
-	artifactPath := maybeStoreBodyArtifact("http_response", entry.ReqID, entry.SourceIP, entry.FQDN, analysis, entry.BodyPreview, entry.Truncated)
-	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
-	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
+	analysis := analyzeBodyPreview(headers, bodyPreview)
+	artifactPath := maybeStoreBodyArtifact(ArtifactStoreParams{
+		Direction: "http_response",
+		ReqID:     reqID,
+		SourceIP:  sourceIP,
+		FQDN:      fqdn,
+		Analysis:  analysis,
+		Body:      bodyPreview,
+		Truncated: truncated,
+	})
+	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
+	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
@@ -481,10 +500,18 @@ func LogHTTPSResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
-	artifactPath := maybeStoreBodyArtifact("https_response", entry.ReqID, entry.SourceIP, entry.FQDN, analysis, entry.BodyPreview, entry.Truncated)
-	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
-	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
+	analysis := analyzeBodyPreview(headers, bodyPreview)
+	artifactPath := maybeStoreBodyArtifact(ArtifactStoreParams{
+		Direction: "https_response",
+		ReqID:     reqID,
+		SourceIP:  sourceIP,
+		FQDN:      fqdn,
+		Analysis:  analysis,
+		Body:      bodyPreview,
+		Truncated: truncated,
+	})
+	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
+	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
@@ -762,8 +789,18 @@ func isLikelyTextBytes(body []byte) bool {
 	return controls*100 <= len(sample)*5
 }
 
-func maybeStoreBodyArtifact(direction string, reqID int64, sourceIP, fqdn string, analysis bodyPreviewAnalysis, body []byte, truncated bool) string {
-	if len(body) == 0 || analysis.ShowAsText {
+type ArtifactStoreParams struct {
+	Direction string
+	ReqID     int64
+	SourceIP  string
+	FQDN      string
+	Analysis  bodyPreviewAnalysis
+	Body      []byte
+	Truncated bool
+}
+
+func maybeStoreBodyArtifact(params ArtifactStoreParams) string {
+	if len(params.Body) == 0 || params.Analysis.ShowAsText {
 		return ""
 	}
 
@@ -780,20 +817,20 @@ func maybeStoreBodyArtifact(direction string, reqID int64, sourceIP, fqdn string
 	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 	fileName := fmt.Sprintf("%s_req%d_%s_%s_%s%s",
 		stamp,
-		reqID,
-		sanitizeFilenameToken(direction),
-		sanitizeFilenameToken(fqdn),
-		sanitizeFilenameToken(sourceIP),
-		bodyArtifactExt(analysis.ContentType, analysis.ContentEncoding),
+		params.ReqID,
+		sanitizeFilenameToken(params.Direction),
+		sanitizeFilenameToken(params.FQDN),
+		sanitizeFilenameToken(params.SourceIP),
+		bodyArtifactExt(params.Analysis.ContentType, params.Analysis.ContentEncoding),
 	)
 	path := filepath.Join(dir, fileName)
 
-	if err := os.WriteFile(path, body, 0640); err != nil {
+	if err := os.WriteFile(path, params.Body, 0640); err != nil {
 		LogError(fmt.Sprintf("Failed writing body artifact %s: %v", path, err))
 		return ""
 	}
 
-	if truncated {
+	if params.Truncated {
 		metaPath := path + ".meta.txt"
 		_ = os.WriteFile(metaPath, []byte("This artifact contains a truncated body preview due to active log truncation limits.\n"), 0640)
 	}
