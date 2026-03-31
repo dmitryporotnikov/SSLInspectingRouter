@@ -283,11 +283,6 @@ func (p *DNSProxy) forwardTCP(payload []byte) ([]byte, error) {
 	return nil, fmt.Errorf("all upstreams failed: %v", lastErr)
 }
 
-func extractQuestionName(msg []byte) (string, error) {
-	name, _, err := parseDNSQuestion(msg)
-	return name, err
-}
-
 func parseDNSQuestion(msg []byte) (string, string, error) {
 	var p dnsmessage.Parser
 	if _, err := p.Start(msg); err != nil {
