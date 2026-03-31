@@ -27,11 +27,26 @@ func TestTrafficLoggingToggleSkipsDBWrites(t *testing.T) {
 		SetTrafficLogging(originalLogging)
 	})
 
-	reqID := LogHTTPRequest("192.0.2.10", "example.com", "GET", "http://example.com/", http.Header{}, []byte("hello"))
+	reqID := LogHTTPRequest(RequestLogEntry{
+		SourceIP: "192.0.2.10",
+		FQDN:     "example.com",
+		Method:   "GET",
+		URL:      "http://example.com/",
+		Headers:  http.Header{},
+		Body:     []byte("hello"),
+	})
 	if reqID <= 0 {
 		t.Fatalf("request id = %d, want > 0", reqID)
 	}
-	LogHTTPResponse(reqID, "192.0.2.10", "example.com", "200 OK", http.Header{}, []byte("ok"), false)
+	LogHTTPResponse(ResponseLogEntry{
+		ReqID:       reqID,
+		SourceIP:    "192.0.2.10",
+		FQDN:        "example.com",
+		Status:      "200 OK",
+		Headers:     http.Header{},
+		BodyPreview: []byte("ok"),
+		Truncated:   false,
+	})
 
 	if got := countRows(t, db, "Requests"); got != 1 {
 		t.Fatalf("requests rows = %d, want 1", got)
@@ -41,11 +56,26 @@ func TestTrafficLoggingToggleSkipsDBWrites(t *testing.T) {
 	}
 
 	SetTrafficLogging(false)
-	disabledReqID := LogHTTPRequest("192.0.2.11", "example.org", "GET", "http://example.org/", http.Header{}, []byte("hello"))
+	disabledReqID := LogHTTPRequest(RequestLogEntry{
+		SourceIP: "192.0.2.11",
+		FQDN:     "example.org",
+		Method:   "GET",
+		URL:      "http://example.org/",
+		Headers:  http.Header{},
+		Body:     []byte("hello"),
+	})
 	if disabledReqID != 0 {
 		t.Fatalf("request id with logging disabled = %d, want 0", disabledReqID)
 	}
-	LogHTTPResponse(disabledReqID, "192.0.2.11", "example.org", "200 OK", http.Header{}, []byte("ok"), false)
+	LogHTTPResponse(ResponseLogEntry{
+		ReqID:       disabledReqID,
+		SourceIP:    "192.0.2.11",
+		FQDN:        "example.org",
+		Status:      "200 OK",
+		Headers:     http.Header{},
+		BodyPreview: []byte("ok"),
+		Truncated:   false,
+	})
 	LogBypassedRequest("192.0.2.12", "bypass.test")
 	LogBypassedResponse(0, "192.0.2.12", "bypass.test")
 

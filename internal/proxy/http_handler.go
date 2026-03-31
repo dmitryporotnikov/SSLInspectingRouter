@@ -136,10 +136,25 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if blockList != nil && blockList.Matches(targetHost) {
-		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
+		reqID := logger.LogHTTPRequest(logger.RequestLogEntry{
+			SourceIP: sourceIP,
+			FQDN:     targetHost,
+			Method:   r.Method,
+			URL:      fullURL,
+			Headers:  r.Header,
+			Body:     bodyBytes,
+		})
 		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s", targetHost, sourceIP))
 		writePlainError(w, http.StatusForbidden, "Blocked")
-		logger.LogHTTPResponse(reqID, sourceIP, targetHost, "403 Forbidden", http.Header{}, []byte("Blocked"), false)
+		logger.LogHTTPResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        targetHost,
+			Status:      "403 Forbidden",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Blocked"),
+			Truncated:   false,
+		})
 		return
 	}
 
@@ -148,7 +163,14 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if bypassed {
 		reqID = logger.LogBypassedRequest(sourceIP, targetHost)
 	} else {
-		reqID = logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
+		reqID = logger.LogHTTPRequest(logger.RequestLogEntry{
+			SourceIP: sourceIP,
+			FQDN:     targetHost,
+			Method:   r.Method,
+			URL:      fullURL,
+			Headers:  r.Header,
+			Body:     bodyBytes,
+		})
 	}
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, fullURL, bytes.NewBuffer(bodyBytes))
@@ -179,7 +201,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if bypassed {
 			logger.LogBypassedResponse(reqID, sourceIP, targetHost)
 		} else {
-			logger.LogHTTPResponse(reqID, sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+			logger.LogHTTPResponse(logger.ResponseLogEntry{
+				ReqID:       reqID,
+				SourceIP:    sourceIP,
+				FQDN:        targetHost,
+				Status:      "502 Bad Gateway",
+				Headers:     http.Header{},
+				BodyPreview: []byte("Bad Gateway"),
+				Truncated:   false,
+			})
 		}
 		return
 	}
@@ -211,7 +241,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
 				writePlainError(w, http.StatusBadGateway, "Bad Gateway")
-				logger.LogHTTPResponse(reqID, sourceIP, targetHost, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+				logger.LogHTTPResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        targetHost,
+					Status:      "502 Bad Gateway",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Bad Gateway"),
+					Truncated:   false,
+				})
 				return
 			}
 
@@ -227,7 +265,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				tee := io.TeeReader(resp.Body, preview)
 				_, _ = io.Copy(w, tee)
 
-				logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+				logger.LogHTTPResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        targetHost,
+					Status:      resp.Status,
+					Headers:     resp.Header,
+					BodyPreview: preview.Bytes(),
+					Truncated:   preview.Truncated(),
+				})
 				logger.LogDebug(fmt.Sprintf("HTTP completed (tamper skipped: body too large): %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 				return
 			}
@@ -247,7 +293,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
 			_, _ = preview.Write(outBody)
-			logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+			logger.LogHTTPResponse(logger.ResponseLogEntry{
+				ReqID:       reqID,
+				SourceIP:    sourceIP,
+				FQDN:        targetHost,
+				Status:      resp.Status,
+				Headers:     resp.Header,
+				BodyPreview: preview.Bytes(),
+				Truncated:   preview.Truncated(),
+			})
 			logger.LogDebug(fmt.Sprintf("HTTP completed (tampered): %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 			return
 		}
@@ -260,7 +314,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tee := io.TeeReader(resp.Body, preview)
 	_, _ = io.Copy(w, tee)
 
-	logger.LogHTTPResponse(reqID, sourceIP, targetHost, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+	logger.LogHTTPResponse(logger.ResponseLogEntry{
+		ReqID:       reqID,
+		SourceIP:    sourceIP,
+		FQDN:        targetHost,
+		Status:      resp.Status,
+		Headers:     resp.Header,
+		BodyPreview: preview.Bytes(),
+		Truncated:   preview.Truncated(),
+	})
 	logger.LogDebug(fmt.Sprintf("HTTP completed: %s %s -> %d", r.Method, r.URL.String(), resp.StatusCode))
 }
 

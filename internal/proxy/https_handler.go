@@ -247,7 +247,15 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 	if blockList != nil && blockList.Matches(hostname) {
 		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
 		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
-		logger.LogHTTPSResponse(reqID, sourceIP, hostname, "BLOCKED", http.Header{}, []byte("Blocked by policy"), false)
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "BLOCKED",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Blocked by policy"),
+			Truncated:   false,
+		})
 		return
 	}
 
@@ -375,7 +383,14 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 
 	fullURL := fmt.Sprintf("https://%s%s", upstreamAuthority, req.URL.RequestURI())
 
-	reqID := logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
+	reqID := logger.LogHTTPSRequest(logger.RequestLogEntry{
+		SourceIP: sourceIP,
+		FQDN:     hostname,
+		Method:   req.Method,
+		URL:      fullURL,
+		Headers:  req.Header,
+		Body:     bodyBytes,
+	})
 
 	proxyReq, err := http.NewRequest(req.Method, fullURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
@@ -401,7 +416,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 	if err != nil {
 		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
 		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
-		logger.LogHTTPSResponse(reqID, sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "502 Bad Gateway",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Bad Gateway"),
+			Truncated:   false,
+		})
 		return
 	}
 	defer resp.Body.Close()
@@ -422,7 +445,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 			if err != nil {
 				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
 				sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
-				logger.LogHTTPSResponse(reqID, sourceIP, hostname, "502 Bad Gateway", http.Header{}, []byte("Bad Gateway"), false)
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "502 Bad Gateway",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Bad Gateway"),
+					Truncated:   false,
+				})
 				return
 			}
 
@@ -449,7 +480,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 					logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
 					return
 				}
-				logger.LogHTTPSResponse(reqID, sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      resp.Status,
+					Headers:     resp.Header,
+					BodyPreview: preview.Bytes(),
+					Truncated:   preview.Truncated(),
+				})
 				logger.LogDebug(fmt.Sprintf("HTTPS completed (tampered): %s %s -> %d", req.Method, fullURL, resp.StatusCode))
 				return
 			}
@@ -464,7 +503,15 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 		logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
 		return
 	}
-	logger.LogHTTPSResponse(reqID, sourceIP, hostname, resp.Status, resp.Header, preview.Bytes(), preview.Truncated())
+	logger.LogHTTPSResponse(logger.ResponseLogEntry{
+		ReqID:       reqID,
+		SourceIP:    sourceIP,
+		FQDN:        hostname,
+		Status:      resp.Status,
+		Headers:     resp.Header,
+		BodyPreview: preview.Bytes(),
+		Truncated:   preview.Truncated(),
+	})
 
 	logger.LogDebug(fmt.Sprintf("HTTPS completed: %s %s -> %d", req.Method, fullURL, resp.StatusCode))
 }
