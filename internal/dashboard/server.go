@@ -206,7 +206,6 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/policy", s.withAuth(http.HandlerFunc(s.handlePolicy)))
 	mux.Handle("/api/rewrites", s.withAuth(http.HandlerFunc(s.handleRewrites)))
 	mux.Handle("/api/rewrites/", s.withAuth(http.HandlerFunc(s.handleRewriteByID)))
-	mux.Handle("/api/traffic", s.withAuth(http.HandlerFunc(s.handleLegacyTraffic)))
 
 	mux.Handle("/", s.frontendHandler())
 
@@ -278,16 +277,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ok":          true,
 		"server_time": s.now().UTC().Format(time.RFC3339Nano),
 	})
-}
-
-func (s *Server) handleLegacyTraffic(w http.ResponseWriter, r *http.Request) {
-	if id := strings.TrimSpace(r.URL.Query().Get("id")); id != "" {
-		clone := r.Clone(r.Context())
-		clone.URL.Path = "/api/v1/traffic/" + id
-		s.handleTrafficDetail(w, clone)
-		return
-	}
-	s.handleTraffic(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
