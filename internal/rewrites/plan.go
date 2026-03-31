@@ -82,7 +82,7 @@ var ErrUnsupportedContentEncoding = errors.New("unsupported content-encoding")
 
 const maxDecodedBodyBytes = 20 << 20 // 20 MiB
 
-// RewriteBody applies body operations to rawBody and updates headers if the output differs; otherwise headers are left untouched.
+// RewriteBody applies body operations to rawBody (as received from upstream) and updates headers if the output differs. If no body changes occur, headers are left untouched.
 func (p *Plan) RewriteBody(h http.Header, rawBody []byte) ([]byte, bool, error) {
 	if len(p.bodyOps) == 0 {
 		return rawBody, false, nil
