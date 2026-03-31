@@ -136,7 +136,14 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if blockList != nil && blockList.Matches(targetHost) {
-		reqID := logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
+		reqID := logger.LogHTTPRequest(logger.RequestLogEntry{
+			SourceIP: sourceIP,
+			FQDN:     targetHost,
+			Method:   r.Method,
+			URL:      fullURL,
+			Headers:  r.Header,
+			Body:     bodyBytes,
+		})
 		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s", targetHost, sourceIP))
 		writePlainError(w, http.StatusForbidden, "Blocked")
 		logger.LogHTTPResponse(logger.ResponseLogEntry{
@@ -156,7 +163,14 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if bypassed {
 		reqID = logger.LogBypassedRequest(sourceIP, targetHost)
 	} else {
-		reqID = logger.LogHTTPRequest(sourceIP, targetHost, r.Method, fullURL, r.Header, bodyBytes)
+		reqID = logger.LogHTTPRequest(logger.RequestLogEntry{
+			SourceIP: sourceIP,
+			FQDN:     targetHost,
+			Method:   r.Method,
+			URL:      fullURL,
+			Headers:  r.Header,
+			Body:     bodyBytes,
+		})
 	}
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, fullURL, bytes.NewBuffer(bodyBytes))

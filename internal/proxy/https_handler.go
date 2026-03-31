@@ -383,7 +383,14 @@ func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP 
 
 	fullURL := fmt.Sprintf("https://%s%s", upstreamAuthority, req.URL.RequestURI())
 
-	reqID := logger.LogHTTPSRequest(sourceIP, hostname, req.Method, fullURL, req.Header, bodyBytes)
+	reqID := logger.LogHTTPSRequest(logger.RequestLogEntry{
+		SourceIP: sourceIP,
+		FQDN:     hostname,
+		Method:   req.Method,
+		URL:      fullURL,
+		Headers:  req.Header,
+		Body:     bodyBytes,
+	})
 
 	proxyReq, err := http.NewRequest(req.Method, fullURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {

@@ -27,7 +27,14 @@ func TestTrafficLoggingToggleSkipsDBWrites(t *testing.T) {
 		SetTrafficLogging(originalLogging)
 	})
 
-	reqID := LogHTTPRequest("192.0.2.10", "example.com", "GET", "http://example.com/", http.Header{}, []byte("hello"))
+	reqID := LogHTTPRequest(RequestLogEntry{
+		SourceIP: "192.0.2.10",
+		FQDN:     "example.com",
+		Method:   "GET",
+		URL:      "http://example.com/",
+		Headers:  http.Header{},
+		Body:     []byte("hello"),
+	})
 	if reqID <= 0 {
 		t.Fatalf("request id = %d, want > 0", reqID)
 	}
@@ -49,7 +56,14 @@ func TestTrafficLoggingToggleSkipsDBWrites(t *testing.T) {
 	}
 
 	SetTrafficLogging(false)
-	disabledReqID := LogHTTPRequest("192.0.2.11", "example.org", "GET", "http://example.org/", http.Header{}, []byte("hello"))
+	disabledReqID := LogHTTPRequest(RequestLogEntry{
+		SourceIP: "192.0.2.11",
+		FQDN:     "example.org",
+		Method:   "GET",
+		URL:      "http://example.org/",
+		Headers:  http.Header{},
+		Body:     []byte("hello"),
+	})
 	if disabledReqID != 0 {
 		t.Fatalf("request id with logging disabled = %d, want 0", disabledReqID)
 	}
