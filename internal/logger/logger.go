@@ -371,14 +371,23 @@ func LogHTTPRequest(sourceIP, fqdn, method, url string, headers http.Header, bod
 	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
 
 	if pcap.GlobalManager != nil {
-		reqDump := fmt.Sprintf("%s %s HTTP/1.1\r\nHost: %s\r\n", method, url, fqdn)
+		var sb strings.Builder
+		sb.WriteString(method)
+		sb.WriteString(" ")
+		sb.WriteString(url)
+		sb.WriteString(" HTTP/1.1\r\nHost: ")
+		sb.WriteString(fqdn)
+		sb.WriteString("\r\n")
 		for k, v := range headers {
 			for _, val := range v {
-				reqDump += fmt.Sprintf("%s: %s\r\n", k, val)
+				sb.WriteString(k)
+				sb.WriteString(": ")
+				sb.WriteString(val)
+				sb.WriteString("\r\n")
 			}
 		}
-		reqDump += "\r\n"
-		fullReq := append([]byte(reqDump), body...)
+		sb.WriteString("\r\n")
+		fullReq := append([]byte(sb.String()), body...)
 		pcap.GlobalManager.WriteRequest(id, sourceIP, fqdn, fullReq)
 	}
 
@@ -396,14 +405,23 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 	id, _ := insertRequest(sourceIP, fqdn, requestLine, content)
 
 	if pcap.GlobalManager != nil {
-		reqDump := fmt.Sprintf("%s %s HTTP/1.1\r\nHost: %s\r\n", method, url, fqdn)
+		var sb strings.Builder
+		sb.WriteString(method)
+		sb.WriteString(" ")
+		sb.WriteString(url)
+		sb.WriteString(" HTTP/1.1\r\nHost: ")
+		sb.WriteString(fqdn)
+		sb.WriteString("\r\n")
 		for k, v := range headers {
 			for _, val := range v {
-				reqDump += fmt.Sprintf("%s: %s\r\n", k, val)
+				sb.WriteString(k)
+				sb.WriteString(": ")
+				sb.WriteString(val)
+				sb.WriteString("\r\n")
 			}
 		}
-		reqDump += "\r\n"
-		fullReq := append([]byte(reqDump), body...)
+		sb.WriteString("\r\n")
+		fullReq := append([]byte(sb.String()), body...)
 		pcap.GlobalManager.WriteRequest(id, sourceIP, fqdn, fullReq)
 	}
 
@@ -421,14 +439,20 @@ func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.He
 	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
-		resDump := fmt.Sprintf("HTTP/1.1 %s\r\n", status)
+		var sb strings.Builder
+		sb.WriteString("HTTP/1.1 ")
+		sb.WriteString(status)
+		sb.WriteString("\r\n")
 		for k, v := range headers {
 			for _, val := range v {
-				resDump += fmt.Sprintf("%s: %s\r\n", k, val)
+				sb.WriteString(k)
+				sb.WriteString(": ")
+				sb.WriteString(val)
+				sb.WriteString("\r\n")
 			}
 		}
-		resDump += "\r\n"
-		fullRes := append([]byte(resDump), bodyPreview...)
+		sb.WriteString("\r\n")
+		fullRes := append([]byte(sb.String()), bodyPreview...)
 		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
 	}
 }
@@ -444,14 +468,20 @@ func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.H
 	insertResponse(reqID, sourceIP, fqdn, status, content)
 
 	if pcap.GlobalManager != nil {
-		resDump := fmt.Sprintf("HTTP/1.1 %s\r\n", status)
+		var sb strings.Builder
+		sb.WriteString("HTTP/1.1 ")
+		sb.WriteString(status)
+		sb.WriteString("\r\n")
 		for k, v := range headers {
 			for _, val := range v {
-				resDump += fmt.Sprintf("%s: %s\r\n", k, val)
+				sb.WriteString(k)
+				sb.WriteString(": ")
+				sb.WriteString(val)
+				sb.WriteString("\r\n")
 			}
 		}
-		resDump += "\r\n"
-		fullRes := append([]byte(resDump), bodyPreview...)
+		sb.WriteString("\r\n")
+		fullRes := append([]byte(sb.String()), bodyPreview...)
 		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
 	}
 }
@@ -567,7 +597,11 @@ func formatContentWithAnalysis(headers http.Header, body []byte, truncated bool,
 		logEntry.WriteString("Headers:\n")
 		for name, values := range headers {
 			for _, value := range values {
-				logEntry.WriteString(fmt.Sprintf("  %s: %s\n", name, value))
+				logEntry.WriteString("  ")
+				logEntry.WriteString(name)
+				logEntry.WriteString(": ")
+				logEntry.WriteString(value)
+				logEntry.WriteString("\n")
 			}
 		}
 	}
