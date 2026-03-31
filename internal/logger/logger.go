@@ -447,34 +447,23 @@ func LogHTTPSRequest(entry RequestLogEntry) int64 {
 	return id
 }
 
-// ResponseLogEntry encapsulates the parameters for logging an HTTP/HTTPS response.
-type ResponseLogEntry struct {
-	ReqID       int64
-	SourceIP    string
-	FQDN        string
-	Status      string
-	Headers     http.Header
-	BodyPreview []byte
-	Truncated   bool
-}
-
 // LogHTTPResponse writes HTTP response details to SQLite.
 func LogHTTPResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(headers, bodyPreview)
+	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
 	artifactPath := maybeStoreBodyArtifact(ArtifactStoreParams{
 		Direction: "http_response",
-		ReqID:     reqID,
-		SourceIP:  sourceIP,
-		FQDN:      fqdn,
+		ReqID:     entry.ReqID,
+		SourceIP:  entry.SourceIP,
+		FQDN:      entry.FQDN,
 		Analysis:  analysis,
-		Body:      bodyPreview,
-		Truncated: truncated,
+		Body:      entry.BodyPreview,
+		Truncated: entry.Truncated,
 	})
-	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
-	insertResponse(reqID, sourceIP, fqdn, status, content)
+	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
+	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
@@ -500,18 +489,18 @@ func LogHTTPSResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(headers, bodyPreview)
+	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
 	artifactPath := maybeStoreBodyArtifact(ArtifactStoreParams{
 		Direction: "https_response",
-		ReqID:     reqID,
-		SourceIP:  sourceIP,
-		FQDN:      fqdn,
+		ReqID:     entry.ReqID,
+		SourceIP:  entry.SourceIP,
+		FQDN:      entry.FQDN,
 		Analysis:  analysis,
-		Body:      bodyPreview,
-		Truncated: truncated,
+		Body:      entry.BodyPreview,
+		Truncated: entry.Truncated,
 	})
-	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
-	insertResponse(reqID, sourceIP, fqdn, status, content)
+	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
+	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
