@@ -428,22 +428,33 @@ func LogHTTPSRequest(sourceIP, fqdn, method, url string, headers http.Header, bo
 	return id
 }
 
+// ResponseLogEntry encapsulates the parameters for logging an HTTP/HTTPS response.
+type ResponseLogEntry struct {
+	ReqID       int64
+	SourceIP    string
+	FQDN        string
+	Status      string
+	Headers     http.Header
+	BodyPreview []byte
+	Truncated   bool
+}
+
 // LogHTTPResponse writes HTTP response details to SQLite.
-func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+func LogHTTPResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(headers, bodyPreview)
-	artifactPath := maybeStoreBodyArtifact("http_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
-	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
-	insertResponse(reqID, sourceIP, fqdn, status, content)
+	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
+	artifactPath := maybeStoreBodyArtifact("http_response", entry.ReqID, entry.SourceIP, entry.FQDN, analysis, entry.BodyPreview, entry.Truncated)
+	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
+	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
 		sb.WriteString("HTTP/1.1 ")
-		sb.WriteString(status)
+		sb.WriteString(entry.Status)
 		sb.WriteString("\r\n")
-		for k, v := range headers {
+		for k, v := range entry.Headers {
 			for _, val := range v {
 				sb.WriteString(k)
 				sb.WriteString(": ")
@@ -452,27 +463,27 @@ func LogHTTPResponse(reqID int64, sourceIP, fqdn, status string, headers http.He
 			}
 		}
 		sb.WriteString("\r\n")
-		fullRes := append([]byte(sb.String()), bodyPreview...)
-		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
+		fullRes := append([]byte(sb.String()), entry.BodyPreview...)
+		pcap.GlobalManager.WriteResponse(entry.ReqID, entry.SourceIP, entry.FQDN, fullRes)
 	}
 }
 
 // LogHTTPSResponse writes HTTPS response details to SQLite.
-func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.Header, bodyPreview []byte, truncated bool) {
+func LogHTTPSResponse(entry ResponseLogEntry) {
 	if !trafficLoggingEnabled.Load() {
 		return
 	}
-	analysis := analyzeBodyPreview(headers, bodyPreview)
-	artifactPath := maybeStoreBodyArtifact("https_response", reqID, sourceIP, fqdn, analysis, bodyPreview, truncated)
-	content := formatContentWithAnalysis(headers, bodyPreview, truncated, analysis, artifactPath)
-	insertResponse(reqID, sourceIP, fqdn, status, content)
+	analysis := analyzeBodyPreview(entry.Headers, entry.BodyPreview)
+	artifactPath := maybeStoreBodyArtifact("https_response", entry.ReqID, entry.SourceIP, entry.FQDN, analysis, entry.BodyPreview, entry.Truncated)
+	content := formatContentWithAnalysis(entry.Headers, entry.BodyPreview, entry.Truncated, analysis, artifactPath)
+	insertResponse(entry.ReqID, entry.SourceIP, entry.FQDN, entry.Status, content)
 
 	if pcap.GlobalManager != nil {
 		var sb strings.Builder
 		sb.WriteString("HTTP/1.1 ")
-		sb.WriteString(status)
+		sb.WriteString(entry.Status)
 		sb.WriteString("\r\n")
-		for k, v := range headers {
+		for k, v := range entry.Headers {
 			for _, val := range v {
 				sb.WriteString(k)
 				sb.WriteString(": ")
@@ -481,8 +492,8 @@ func LogHTTPSResponse(reqID int64, sourceIP, fqdn, status string, headers http.H
 			}
 		}
 		sb.WriteString("\r\n")
-		fullRes := append([]byte(sb.String()), bodyPreview...)
-		pcap.GlobalManager.WriteResponse(reqID, sourceIP, fqdn, fullRes)
+		fullRes := append([]byte(sb.String()), entry.BodyPreview...)
+		pcap.GlobalManager.WriteResponse(entry.ReqID, entry.SourceIP, entry.FQDN, fullRes)
 	}
 }
 
