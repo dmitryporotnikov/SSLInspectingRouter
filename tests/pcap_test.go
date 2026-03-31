@@ -1,4 +1,4 @@
-package pcap_test
+package tests
 
 import (
 	"encoding/binary"
