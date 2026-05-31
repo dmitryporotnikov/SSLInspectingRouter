@@ -53,6 +53,7 @@
             <nav class="nav-list">
                 <button type="button" data-section="traffic" class="nav-item active" data-i18n="nav.traffic"></button>
                 <button type="button" data-section="rewrites" class="nav-item" data-i18n="nav.rewrites"></button>
+                <button type="button" data-section="firewall" class="nav-item" id="firewall-nav" data-i18n="nav.firewall"></button>
                 <button type="button" data-section="users" class="nav-item" id="users-nav" data-i18n="nav.users"></button>
             </nav>
 
@@ -410,6 +411,95 @@
                         </div>
 
                         <p id="rewrite-form-error" class="form-error hidden"></p>
+                    </form>
+                </div>
+            </section>
+
+            <section id="firewall-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3 data-i18n="firewall.title"></h3>
+                    <div class="section-actions">
+                        <div class="switch-wrap inline-switch" id="firewall-mode-wrap">
+                            <span data-i18n="firewall.modeLabel"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="firewall-mode-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="firewall-add-rule-btn" data-i18n="firewall.addRule"></button>
+                    </div>
+                </div>
+
+                <div class="firewall-layout">
+                    <div class="firewall-rules-panel">
+                        <div class="firewall-rules-header">
+                            <span data-i18n="firewall.rules"></span>
+                            <span id="firewall-rules-count" class="muted">0</span>
+                        </div>
+                        <p class="firewall-default-note" data-i18n="firewall.defaultNote"></p>
+                        <div id="firewall-rules-list" class="firewall-rules-list"></div>
+                    </div>
+
+                    <form id="firewall-rule-form" class="firewall-rule-form">
+                        <div class="firewall-form-head">
+                            <div>
+                                <h4 id="firewall-rule-form-title"></h4>
+                            </div>
+                            <label class="checkbox-row firewall-enabled-row">
+                                <input type="checkbox" id="firewall-rule-enabled" checked>
+                                <span data-i18n="firewall.fields.enabled"></span>
+                            </label>
+                        </div>
+
+                        <div class="firewall-form-grid">
+                            <label>
+                                <span data-i18n="firewall.fields.action"></span>
+                                <select id="firewall-rule-action" required>
+                                    <option value="block" data-i18n="firewall.actions.block"></option>
+                                    <option value="bypass" data-i18n="firewall.actions.bypass"></option>
+                                    <option value="inspect" data-i18n="firewall.actions.inspect"></option>
+                                </select>
+                            </label>
+                            <label id="firewall-block-mode-wrap" class="hidden">
+                                <span data-i18n="firewall.fields.blockMode"></span>
+                                <select id="firewall-rule-block-mode">
+                                    <option value="display_page" data-i18n="firewall.blockModes.displayPage"></option>
+                                    <option value="silent_drop" data-i18n="firewall.blockModes.silentDrop"></option>
+                                </select>
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.priority"></span>
+                                <input type="number" id="firewall-rule-priority" value="0" min="0" max="1000">
+                            </label>
+                        </div>
+
+                        <h5 data-i18n="firewall.fields.matchConditions"></h5>
+                        <div class="firewall-form-grid">
+                            <label>
+                                <span data-i18n="firewall.fields.host"></span>
+                                <input type="text" id="firewall-rule-host" placeholder="example.com">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.hostRegex"></span>
+                                <input type="text" id="firewall-rule-host-regex" placeholder="(^|\.)example\.com$">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.ip"></span>
+                                <input type="text" id="firewall-rule-ip" placeholder="192.168.1.1">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.cidr"></span>
+                                <input type="text" id="firewall-rule-cidr" placeholder="10.0.0.0/8">
+                            </label>
+                        </div>
+
+                        <div class="firewall-form-actions">
+                            <button type="submit" class="btn btn-primary" id="firewall-save-btn" data-i18n="firewall.saveRule"></button>
+                            <button type="button" class="btn btn-ghost" id="firewall-delete-btn" data-i18n="firewall.deleteRule"></button>
+                            <button type="button" class="btn btn-ghost" id="firewall-cancel-btn" data-i18n="firewall.cancelEdit"></button>
+                            <span class="muted" id="firewall-save-status"></span>
+                        </div>
+                        <p id="firewall-form-error" class="form-error hidden"></p>
                     </form>
                 </div>
             </section>

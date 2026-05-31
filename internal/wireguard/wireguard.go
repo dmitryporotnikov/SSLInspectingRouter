@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
 
 const (
@@ -120,9 +122,23 @@ func (m *Manager) SaveConfig(raw string) (string, error) {
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
+
+	// Write to app directory first
 	if err := os.WriteFile(m.preferred, []byte(content), 0600); err != nil {
 		return "", fmt.Errorf("write wireguard config: %w", err)
 	}
+
+	// Also copy to /etc/wireguard for wg-quick compatibility
+	etcDir := "/etc/wireguard"
+	if err := os.MkdirAll(etcDir, 0700); err != nil {
+		logger.LogError(fmt.Sprintf("create /etc/wireguard directory: %v", err))
+	} else {
+		etcPath := filepath.Join(etcDir, "wg0.conf")
+		if err := os.WriteFile(etcPath, []byte(content), 0600); err != nil {
+			logger.LogError(fmt.Sprintf("write wireguard config to /etc/wireguard: %v", err))
+		}
+	}
+
 	return m.preferred, nil
 }
 
@@ -197,7 +213,8 @@ func (m *Manager) Enable() (Status, error) {
 		return m.statusLocked()
 	}
 
-	if _, err := m.run("wg-quick", "up", path); err != nil {
+	// Use interface name instead of full path, since config is now in /etc/wireguard/
+	if _, err := m.run("wg-quick", "up", iface); err != nil {
 		return Status{}, fmt.Errorf("wg-quick up %s failed: %w", path, err)
 	}
 

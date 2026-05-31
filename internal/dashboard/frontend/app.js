@@ -19,6 +19,12 @@ const state = {
         drop_list: [],
         bypass_list: [],
     },
+    firewall: {
+        enabled: false,
+        rules: [],
+        selectedRuleId: null,
+        dirty: false,
+    },
     traffic: {
         items: [],
         total: 0,
@@ -63,6 +69,29 @@ const dom = {
     trafficSection: document.getElementById("traffic-section"),
     rewritesSection: document.getElementById("rewrites-section"),
     usersSection: document.getElementById("users-section"),
+    firewallSection: document.getElementById("firewall-section"),
+    firewallNav: document.getElementById("firewall-nav"),
+    firewallModeToggle: document.getElementById("firewall-mode-toggle"),
+    firewallModeWrap: document.getElementById("firewall-mode-wrap"),
+    firewallAddRuleBtn: document.getElementById("firewall-add-rule-btn"),
+    firewallRulesCount: document.getElementById("firewall-rules-count"),
+    firewallRulesList: document.getElementById("firewall-rules-list"),
+    firewallRuleForm: document.getElementById("firewall-rule-form"),
+    firewallRuleFormTitle: document.getElementById("firewall-rule-form-title"),
+    firewallRuleEnabled: document.getElementById("firewall-rule-enabled"),
+    firewallRuleAction: document.getElementById("firewall-rule-action"),
+    firewallBlockModeWrap: document.getElementById("firewall-block-mode-wrap"),
+    firewallRuleBlockMode: document.getElementById("firewall-rule-block-mode"),
+    firewallRulePriority: document.getElementById("firewall-rule-priority"),
+    firewallRuleHost: document.getElementById("firewall-rule-host"),
+    firewallRuleHostRegex: document.getElementById("firewall-rule-host-regex"),
+    firewallRuleIP: document.getElementById("firewall-rule-ip"),
+    firewallRuleCIDR: document.getElementById("firewall-rule-cidr"),
+    firewallSaveBtn: document.getElementById("firewall-save-btn"),
+    firewallDeleteBtn: document.getElementById("firewall-delete-btn"),
+    firewallCancelBtn: document.getElementById("firewall-cancel-btn"),
+    firewallSaveStatus: document.getElementById("firewall-save-status"),
+    firewallFormError: document.getElementById("firewall-form-error"),
     currentUser: document.getElementById("current-user"),
     currentRole: document.getElementById("current-role"),
     themeToggle: document.getElementById("theme-toggle"),
@@ -620,11 +649,14 @@ function applyUserContext() {
 
     const admin = isAdmin();
     dom.usersNav.classList.toggle("hidden", !admin);
+    dom.firewallNav.classList.toggle("hidden", !admin);
     dom.settingsPanel.classList.toggle("hidden", !admin);
     dom.bodyArtifactsMeta.classList.toggle("hidden", !admin);
     dom.flushTrafficBtn.disabled = !admin;
     dom.flushTrafficBtn.title = admin ? t("traffic.flushTitle") : t("users.adminRequired");
     if (!admin && state.section === "users") {
+        switchSection("traffic");
+    } else if (!admin && state.section === "firewall") {
         switchSection("traffic");
     }
     syncEgressToggleAvailability();
@@ -639,10 +671,13 @@ function switchSection(section) {
 
     dom.trafficSection.classList.toggle("hidden", section !== "traffic");
     dom.rewritesSection.classList.toggle("hidden", section !== "rewrites");
+    dom.firewallSection.classList.toggle("hidden", section !== "firewall");
     dom.usersSection.classList.toggle("hidden", section !== "users");
 
     if (section === "rewrites") {
         renderRewriteEditor();
+    } else if (section === "firewall") {
+        renderFirewallTab();
     }
 }
 
@@ -691,7 +726,7 @@ function bindEvents() {
     dom.navButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
             const section = btn.dataset.section;
-            if (section === "users" && !isAdmin()) {
+            if (!isAdmin() && (section === "users" || section === "firewall")) {
                 return;
             }
             switchSection(section);
@@ -699,6 +734,8 @@ function bindEvents() {
                 void loadUsers();
             } else if (section === "rewrites") {
                 void loadRewrites({ forceApply: true });
+            } else if (section === "firewall") {
+                void loadFirewallStatus();
             }
         });
     });
@@ -832,6 +869,37 @@ function bindEvents() {
         void loadUsers();
     });
 
+    dom.firewallModeToggle.addEventListener("change", () => {
+        void updateFirewallMode(dom.firewallModeToggle.checked);
+    });
+    dom.firewallAddRuleBtn.addEventListener("click", () => {
+        beginNewFirewallRule();
+    });
+    dom.firewallRuleForm.addEventListener("submit", handleFirewallRuleSave);
+    dom.firewallDeleteBtn.addEventListener("click", () => {
+        void handleFirewallRuleDelete();
+    });
+    dom.firewallCancelBtn.addEventListener("click", () => {
+        resetFirewallRuleForm();
+        renderFirewallTab();
+    });
+    dom.firewallRuleAction.addEventListener("change", () => {
+        const action = dom.firewallRuleAction.value;
+        dom.firewallBlockModeWrap.classList.toggle("hidden", action !== "block");
+    });
+    dom.firewallRulesList.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-rule-id]");
+        if (!button) return;
+        const ruleId = Number(button.dataset.ruleId);
+        if (!ruleId) return;
+        selectFirewallRule(ruleId);
+    });
+    dom.firewallRuleForm.addEventListener("input", () => {
+        state.firewall.dirty = true;
+        dom.firewallSaveStatus.textContent = "";
+        dom.firewallFormError.classList.add("hidden");
+    });
+
     dom.userForm.addEventListener("submit", handleUserSubmit);
     dom.cancelEditBtn.addEventListener("click", resetUserForm);
 
@@ -921,6 +989,12 @@ function handleSessionExpired() {
         lastWarning: "",
         transientEmptySkips: 0,
     };
+    state.firewall = {
+        enabled: false,
+        rules: [],
+        selectedRuleId: null,
+        dirty: false,
+    };
     state.section = "traffic";
     dom.bodyArtifactsDir.textContent = t("status.disabled");
     dom.bodyArtifactsDir.title = t("status.disabled");
@@ -975,18 +1049,19 @@ function stopPolling() {
 async function refreshDashboard(forceTrafficReload) {
     const statusTask = loadStatus();
     const policyTask = loadPolicy();
+    const firewallTask = state.section === "firewall" ? loadFirewallStatus() : Promise.resolve();
     const trafficTask = state.section === "traffic" || forceTrafficReload ? loadTraffic() : Promise.resolve();
     const rulesTask = loadRewrites({ preserveForm: state.section === "rewrites" && state.rewrites.dirty });
 
     if (isAdmin()) {
-        await Promise.allSettled([statusTask, policyTask, trafficTask, rulesTask]);
+        await Promise.allSettled([statusTask, policyTask, firewallTask, trafficTask, rulesTask]);
         if (state.section === "users") {
             await loadUsers();
         }
         return;
     }
 
-    await Promise.allSettled([statusTask, policyTask, trafficTask, rulesTask]);
+    await Promise.allSettled([statusTask, policyTask, firewallTask, trafficTask, rulesTask]);
 }
 
 async function loadStatus() {
@@ -2293,6 +2368,274 @@ async function deleteUser(userID) {
         await loadUsers();
     } catch (error) {
         alert(error.message);
+    }
+}
+
+async function loadFirewallStatus() {
+    try {
+        const response = await apiRequest("/api/v1/firewall/status");
+        state.firewall.enabled = !!response.enabled;
+        dom.firewallModeToggle.checked = state.firewall.enabled;
+        await loadFirewallRules();
+    } catch (_error) {}
+}
+
+async function loadFirewallRules() {
+    try {
+        const response = await apiRequest("/api/v1/firewall/rules");
+        state.firewall.rules = Array.isArray(response.rules) ? response.rules : [];
+        dom.firewallRulesCount.textContent = String(state.firewall.rules.length);
+        renderFirewallRulesList();
+    } catch (_error) {}
+}
+
+function renderFirewallRulesList() {
+    clearElement(dom.firewallRulesList);
+    if (!state.firewall.rules.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted firewall-empty";
+        empty.textContent = t("firewall.empty");
+        dom.firewallRulesList.appendChild(empty);
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    state.firewall.rules.forEach((rule) => {
+        const selected = rule.id === state.firewall.selectedRuleId;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = selected ? "firewall-rule-item active" : "firewall-rule-item";
+        button.dataset.ruleId = String(rule.id || "");
+
+        const top = document.createElement("div");
+        top.className = "firewall-rule-top";
+
+        const priority = document.createElement("span");
+        priority.className = "firewall-rule-priority";
+        priority.textContent = `#${rule.priority}`;
+        top.appendChild(priority);
+
+        const action = document.createElement("span");
+        action.className = `firewall-rule-action action-${rule.action}`;
+        action.textContent = t(`firewall.actions.${rule.action}`);
+        top.appendChild(action);
+
+        const enabled = document.createElement("span");
+        enabled.className = "firewall-rule-state";
+        enabled.textContent = rule.enabled ? t("status.enabled") : t("status.disabled");
+        top.appendChild(enabled);
+
+        button.appendChild(top);
+
+        const match = document.createElement("div");
+        match.className = "firewall-rule-match";
+        const matchParts = [];
+        if (rule.match && rule.match.host) matchParts.push(rule.match.host);
+        if (rule.match && rule.match.host_regex) matchParts.push(`Regex: ${rule.match.host_regex}`);
+        if (rule.match && rule.match.ip) matchParts.push(`IP: ${rule.match.ip}`);
+        if (rule.match && rule.match.cidr) matchParts.push(`CIDR: ${rule.match.cidr}`);
+        match.textContent = matchParts.length ? matchParts.join(", ") : t("firewall.matchAll");
+        button.appendChild(match);
+
+        fragment.appendChild(button);
+    });
+
+    dom.firewallRulesList.appendChild(fragment);
+}
+
+function renderFirewallTab() {
+    dom.firewallModeToggle.checked = state.firewall.enabled;
+    dom.firewallRulesCount.textContent = String(state.firewall.rules.length);
+    renderFirewallRulesList();
+
+    if (state.firewall.selectedRuleId) {
+        const rule = state.firewall.rules.find(r => r.id === state.firewall.selectedRuleId);
+        if (rule) {
+            applyFirewallRuleForm(rule);
+            dom.firewallRuleFormTitle.textContent = rule.name || `Rule #${rule.id}`;
+            dom.firewallSaveBtn.textContent = t("firewall.updateRule");
+            dom.firewallDeleteBtn.classList.remove("hidden");
+        } else {
+            resetFirewallRuleForm();
+        }
+    } else {
+        resetFirewallRuleForm();
+    }
+}
+
+function applyFirewallRuleForm(rule) {
+    dom.firewallRuleEnabled.checked = rule.enabled !== false;
+    dom.firewallRuleAction.value = rule.action || "block";
+    dom.firewallRuleBlockMode.value = rule.block_mode || "display_page";
+    dom.firewallRulePriority.value = rule.priority || 0;
+    dom.firewallBlockModeWrap.classList.toggle("hidden", rule.action !== "block");
+
+    const match = rule.match || {};
+    dom.firewallRuleHost.value = match.host || "";
+    dom.firewallRuleHostRegex.value = match.host_regex || "";
+    dom.firewallRuleIP.value = match.ip || "";
+    dom.firewallRuleCIDR.value = match.cidr || "";
+
+    dom.firewallFormError.classList.add("hidden");
+}
+
+function resetFirewallRuleForm() {
+    state.firewall.selectedRuleId = null;
+    state.firewall.dirty = false;
+    dom.firewallRuleEnabled.checked = true;
+    dom.firewallRuleAction.value = "block";
+    dom.firewallRuleBlockMode.value = "display_page";
+    dom.firewallRulePriority.value = 0;
+    dom.firewallRuleHost.value = "";
+    dom.firewallRuleHostRegex.value = "";
+    dom.firewallRuleIP.value = "";
+    dom.firewallRuleCIDR.value = "";
+    dom.firewallBlockModeWrap.classList.add("hidden");
+    dom.firewallRuleFormTitle.textContent = t("firewall.newRuleTitle");
+    dom.firewallSaveBtn.textContent = t("firewall.saveRule");
+    dom.firewallDeleteBtn.classList.add("hidden");
+    dom.firewallSaveStatus.textContent = "";
+    dom.firewallFormError.classList.add("hidden");
+}
+
+function beginNewFirewallRule() {
+    if (!isAdmin()) return;
+    state.firewall.selectedRuleId = null;
+    state.firewall.dirty = false;
+    resetFirewallRuleForm();
+    renderFirewallRulesList();
+}
+
+function selectFirewallRule(ruleId) {
+    if (state.firewall.dirty && !window.confirm(t("firewall.discardUnsavedChanges"))) {
+        return;
+    }
+    state.firewall.selectedRuleId = ruleId;
+    state.firewall.dirty = false;
+    dom.firewallSaveStatus.textContent = "";
+    renderFirewallTab();
+}
+
+function buildFirewallRuleFromForm() {
+    const action = dom.firewallRuleAction.value;
+    if (!action || (action !== "block" && action !== "bypass" && action !== "inspect")) {
+        throw new Error(t("firewall.errors.invalidAction"));
+    }
+
+    const match = {};
+    const host = dom.firewallRuleHost.value.trim();
+    if (host) match.host = host;
+    const hostRegex = dom.firewallRuleHostRegex.value.trim();
+    if (hostRegex) match.host_regex = hostRegex;
+    const ip = dom.firewallRuleIP.value.trim();
+    if (ip) match.ip = ip;
+    const cidr = dom.firewallRuleCIDR.value.trim();
+    if (cidr) match.cidr = cidr;
+
+    const rule = {
+        enabled: dom.firewallRuleEnabled.checked,
+        action: action,
+        priority: Number(dom.firewallRulePriority.value) || 0,
+        match: match,
+    };
+
+    if (action === "block") {
+        rule.block_mode = dom.firewallRuleBlockMode.value || "display_page";
+    }
+
+    return rule;
+}
+
+async function updateFirewallMode(enabled) {
+    if (!isAdmin()) return;
+    try {
+        await apiRequest("/api/v1/firewall/rules", {
+            method: "PUT",
+            body: { enabled },
+        });
+        state.firewall.enabled = enabled;
+    } catch (error) {
+        dom.firewallModeToggle.checked = !enabled;
+        alert(error.message);
+    }
+}
+
+async function handleFirewallRuleSave(event) {
+    event.preventDefault();
+    if (!isAdmin()) return;
+
+    dom.firewallFormError.classList.add("hidden");
+    dom.firewallSaveStatus.textContent = "";
+
+    let rule;
+    try {
+        rule = buildFirewallRuleFromForm();
+    } catch (error) {
+        dom.firewallFormError.textContent = error.message;
+        dom.firewallFormError.classList.remove("hidden");
+        return;
+    }
+
+    dom.firewallSaveBtn.disabled = true;
+    dom.firewallDeleteBtn.disabled = true;
+    dom.firewallSaveStatus.textContent = t("firewall.saving");
+
+    try {
+        let response;
+        if (state.firewall.selectedRuleId) {
+            response = await apiRequest(`/api/v1/firewall/rules/${state.firewall.selectedRuleId}`, {
+                method: "PUT",
+                body: rule,
+            });
+        } else {
+            response = await apiRequest("/api/v1/firewall/rules", {
+                method: "POST",
+                body: rule,
+            });
+        }
+        state.firewall.dirty = false;
+        if (response.rule && response.rule.id) {
+            state.firewall.selectedRuleId = response.rule.id;
+        }
+        await loadFirewallRules();
+        renderFirewallTab();
+        dom.firewallSaveStatus.textContent = t("firewall.saved");
+    } catch (error) {
+        dom.firewallSaveStatus.textContent = "";
+        dom.firewallFormError.textContent = error.message;
+        dom.firewallFormError.classList.remove("hidden");
+    } finally {
+        dom.firewallSaveBtn.disabled = false;
+        dom.firewallDeleteBtn.disabled = false;
+    }
+}
+
+async function handleFirewallRuleDelete() {
+    if (!isAdmin()) return;
+    if (!state.firewall.selectedRuleId) return;
+    if (!window.confirm(t("firewall.deleteConfirm"))) return;
+
+    dom.firewallSaveBtn.disabled = true;
+    dom.firewallDeleteBtn.disabled = true;
+    dom.firewallSaveStatus.textContent = t("firewall.deleting");
+    dom.firewallFormError.classList.add("hidden");
+
+    try {
+        await apiRequest(`/api/v1/firewall/rules/${state.firewall.selectedRuleId}`, {
+            method: "DELETE",
+        });
+        state.firewall.selectedRuleId = null;
+        state.firewall.dirty = false;
+        await loadFirewallRules();
+        resetFirewallRuleForm();
+        renderFirewallTab();
+        dom.firewallSaveStatus.textContent = t("firewall.deleted");
+    } catch (error) {
+        dom.firewallSaveStatus.textContent = "";
+        dom.firewallFormError.textContent = error.message;
+        dom.firewallFormError.classList.remove("hidden");
+    } finally {
+        dom.firewallSaveBtn.disabled = false;
     }
 }
 

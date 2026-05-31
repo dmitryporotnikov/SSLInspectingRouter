@@ -642,9 +642,9 @@ func trafficModeCondition(mode string) (string, bool) {
 	case "paused":
 		return `(r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED')`, true
 	case "blocked":
-		return `(COALESCE(res.response, '') = 'BLOCKED' OR COALESCE(res.response, '') LIKE '403 %')`, true
+		return `COALESCE(res.response, '') = 'BLOCKED'`, true
 	case "inspected":
-		return `NOT (r.request = 'BYPASSED' OR COALESCE(res.response, '') = 'BYPASSED' OR r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED')`, true
+		return `NOT (r.request = 'BYPASSED' OR COALESCE(res.response, '') = 'BYPASSED' OR r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'BLOCKED' OR COALESCE(res.response, '') LIKE '403 %')`, true
 	default:
 		return "", false
 	}

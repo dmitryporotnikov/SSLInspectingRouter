@@ -16,6 +16,7 @@ import (
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
@@ -239,6 +240,37 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 		reqID := logger.LogInspectionPausedRequest(sourceIP, hostname)
 		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogInspectionPaused)
 		return
+	}
+
+	fm := firewall.GetManager()
+	if fm.IsEnabled() {
+		action, _, matched := fm.MatchTraffic(hostname, sourceIP)
+		if matched {
+			switch action {
+			case firewall.ActionBlock:
+				logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (firewall rule)", hostname, sourceIP))
+				reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+				// For HTTPS, we can't send an HTTP response over the TLS connection.
+				// Just close the connection which shows as SSL_ERROR_SYSCALL in browser.
+				conn.Close()
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "BLOCKED",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Blocked by network policy"),
+					Truncated:   false,
+				})
+				return
+			case firewall.ActionBypass:
+				reqID := logger.LogBypassedRequest(sourceIP, hostname)
+				h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogBypassed)
+				return
+			case firewall.ActionInspect:
+				// Continue with normal inspection
+			}
+		}
 	}
 
 	blockList := h.currentBlockList()

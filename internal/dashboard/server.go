@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/dnsproxy"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/proxy"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
@@ -128,6 +129,12 @@ func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler,
 	s.wireguardRuntime = options.Runtime.WireGuard
 	s.torRuntime = options.Runtime.Tor
 
+	// Initialize firewall manager with database
+	fm := firewall.GetManager()
+	if err := fm.Initialize(db); err != nil {
+		logger.LogError(fmt.Sprintf("Failed to initialize firewall: %v", err))
+	}
+
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           s.routes(),
@@ -194,6 +201,9 @@ func (s *Server) routes() http.Handler {
 
 	mux.Handle("/api/v1/status", s.withAuth(http.HandlerFunc(s.handleStatus)))
 	mux.Handle("/api/v1/policy", s.withAuth(http.HandlerFunc(s.handlePolicy)))
+	mux.Handle("/api/v1/firewall/status", s.withAuth(http.HandlerFunc(s.handleFirewallStatus)))
+	mux.Handle("/api/v1/firewall/rules", s.withAuth(http.HandlerFunc(s.handleFirewallRules)))
+	mux.Handle("/api/v1/firewall/rules/", s.withAuth(http.HandlerFunc(s.handleFirewallRuleByID)))
 	mux.Handle("/api/v1/traffic", s.withAuth(http.HandlerFunc(s.handleTraffic)))
 	mux.Handle("/api/v1/traffic/", s.withAuth(http.HandlerFunc(s.handleTrafficDetail)))
 	mux.Handle("/api/v1/rewrites", s.withAuth(http.HandlerFunc(s.handleRewrites)))

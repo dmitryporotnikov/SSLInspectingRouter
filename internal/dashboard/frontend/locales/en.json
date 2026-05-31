@@ -25,6 +25,7 @@
     "nav": {
       "traffic": "Traffic",
       "rewrites": "Rewrites",
+      "firewall": "Firewall",
       "users": "Users"
     },
     "sidebar": {
@@ -49,7 +50,7 @@
       "artifactDirectoryPlaceholder": "Artifact directory",
       "setPath": "Set Path",
       "wireguardClientConfig": "WireGuard Client Config",
-      "wireguardNoteHtml": "Paste a client config or place a <code>.conf</code> file in the project <code>wireguard/</code> directory.",
+      "wireguardNoteHtml": "Paste a WireGuard client config above. The config is automatically saved and applied to <code>/etc/wireguard/wg0.conf</code> when you enable tunnel.",
       "saveWireGuardConfig": "Save WireGuard Config",
       "tunnel": "Tunnel",
       "torSection": "Tor Egress",
@@ -297,6 +298,51 @@
     "errors": {
       "networkRequestFailed": "Network request failed",
       "requestFailed": "Request failed ({status})"
+    },
+    "firewall": {
+      "title": "Firewall Rules",
+      "modeLabel": "Firewall Mode",
+      "addRule": "Add Rule",
+      "rules": "Rules",
+      "defaultNote": "When firewall mode is enabled, all traffic (HTTP and HTTPS) is blocked by default. Add rules above to allow or inspect specific traffic.",
+      "empty": "No firewall rules configured.",
+      "newRuleTitle": "New Firewall Rule",
+      "saveRule": "Save Rule",
+      "updateRule": "Update Rule",
+      "deleteRule": "Delete Rule",
+      "cancelEdit": "Cancel",
+      "deleteConfirm": "Delete this firewall rule?",
+      "discardUnsavedChanges": "Discard unsaved firewall rule changes?",
+      "matchAll": "matches all traffic",
+      "fields": {
+        "enabled": "Enabled",
+        "action": "Action",
+        "blockMode": "Block Mode",
+        "priority": "Priority (higher = first)",
+        "host": "Host",
+        "hostRegex": "Host Regex",
+        "ip": "IP Address",
+        "cidr": "CIDR",
+        "matchConditions": "Match Conditions"
+      },
+      "actions": {
+        "block": "Block",
+        "bypass": "Bypass",
+        "inspect": "Inspect"
+      },
+      "blockModes": {
+        "displayPage": "Show Blocked Page",
+        "silentDrop": "Silent Drop"
+      },
+      "status": {
+        "saving": "Saving...",
+        "saved": "Saved.",
+        "deleting": "Deleting...",
+        "deleted": "Deleted."
+      },
+      "errors": {
+        "invalidAction": "Action must be block, bypass, or inspect."
+      }
     }
   }
 }
