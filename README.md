@@ -25,6 +25,9 @@ Thanks to [@ankit20012006](https://github.com/ankit20012006) and [@Anand-240](ht
 ## Quick Start
 
 ```bash
+# Pre-req:
+If you don't have go, install it for your distro. E.g. for Ubuntu - apt install golang
+
 # 1. Clone the repository
 git clone https://github.com/dmitryporotnikov/SSLInspectingRouter.git
 
