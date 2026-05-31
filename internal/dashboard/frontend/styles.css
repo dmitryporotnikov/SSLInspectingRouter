@@ -128,9 +128,32 @@ body[data-i18n-state="loading"] .app-view {
     inset: 0;
     pointer-events: none;
     background:
-        radial-gradient(circle at 86% 8%, rgba(78, 160, 255, 0.2) 0, transparent 46%),
-        radial-gradient(circle at 10% 92%, rgba(78, 160, 255, 0.14) 0, transparent 44%);
+        radial-gradient(ellipse 80% 50% at 20% 0%, rgba(78, 160, 255, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 80% 10%, rgba(87, 216, 163, 0.08) 0%, transparent 40%),
+        radial-gradient(ellipse 50% 60% at 10% 85%, rgba(78, 160, 255, 0.12) 0%, transparent 45%),
+        radial-gradient(ellipse 70% 50% at 90% 90%, rgba(87, 216, 163, 0.06) 0%, transparent 35%),
+        radial-gradient(ellipse 40% 30% at 50% 50%, rgba(78, 160, 255, 0.05) 0%, transparent 60%),
+        linear-gradient(180deg, #050b16 0%, #0a1526 50%, #050b16 100%);
     z-index: -1;
+}
+
+.background-layer::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 25% 25%, rgba(78, 160, 255, 0.03) 0%, transparent 25%),
+        radial-gradient(circle at 75% 75%, rgba(87, 216, 163, 0.02) 0%, transparent 25%);
+    background-size: 60px 60px;
+    animation: bgShift 20s ease-in-out infinite;
+    opacity: 0.6;
+}
+
+@keyframes bgShift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    25% { transform: translate(-10px, 5px) scale(1.02); }
+    50% { transform: translate(5px, -10px) scale(0.98); }
+    75% { transform: translate(10px, 10px) scale(1.01); }
 }
 
 .hidden {
@@ -222,9 +245,13 @@ code {
     content: "";
     position: absolute;
     inset: 0;
-    background-image:
-        linear-gradient(125deg, rgba(5, 11, 22, 0.5) 0%, rgba(5, 11, 22, 0.8) 52%, rgba(13, 33, 58, 0.88) 100%),
-        url("/login-wallpaper.jpg");
+    background:
+        radial-gradient(ellipse 80% 50% at 20% 0%, rgba(78, 160, 255, 0.18) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 80% 10%, rgba(87, 216, 163, 0.08) 0%, transparent 40%),
+        radial-gradient(ellipse 50% 60% at 10% 85%, rgba(78, 160, 255, 0.12) 0%, transparent 45%),
+        radial-gradient(ellipse 70% 50% at 90% 90%, rgba(87, 216, 163, 0.06) 0%, transparent 35%),
+        radial-gradient(ellipse 40% 30% at 50% 50%, rgba(78, 160, 255, 0.05) 0%, transparent 60%),
+        linear-gradient(180deg, #050b16 0%, #0a1526 50%, #050b16 100%);
     background-size: cover;
     background-position: center;
     z-index: -2;
@@ -232,6 +259,23 @@ code {
 
 .auth-view::after {
     content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(circle at 25% 25%, rgba(78, 160, 255, 0.03) 0%, transparent 25%),
+        radial-gradient(circle at 75% 75%, rgba(87, 216, 163, 0.02) 0%, transparent 25%);
+    background-size: 60px 60px;
+    animation: bgShift 20s ease-in-out infinite;
+    opacity: 0.6;
+    z-index: -1;
+}
+
+@keyframes bgShift {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    25% { transform: translate(-10px, 5px) scale(1.02); }
+    50% { transform: translate(5px, -10px) scale(0.98); }
+    75% { transform: translate(10px, 10px) scale(1.01); }
+}
     position: absolute;
     inset: 0;
     background: radial-gradient(circle at 70% 16%, rgba(78, 160, 255, 0.2), transparent 42%);
@@ -1290,5 +1334,259 @@ tr:hover td {
 
     .policy-grid textarea {
         min-height: 88px;
+    }
+}
+
+/* Firewall Tab */
+.firewall-layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.firewall-rules-panel {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.firewall-rules-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.firewall-default-note {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin: 0 0 10px 0;
+    padding: 6px 8px;
+    background: var(--bg-2);
+    border-radius: 6px;
+    border-left: 3px solid var(--accent);
+}
+
+.firewall-rules-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.firewall-empty {
+    text-align: center;
+    padding: 30px 10px;
+    font-size: 0.85rem;
+}
+
+.firewall-rule-item {
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 150ms ease, background 150ms ease;
+    width: 100%;
+}
+
+.firewall-rule-item:hover {
+    border-color: var(--accent);
+    background: var(--bg-2);
+}
+
+.firewall-rule-item.active {
+    border-color: var(--accent);
+    background: var(--bg-2);
+}
+
+.firewall-rule-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.firewall-rule-priority {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    background: var(--bg-1);
+    padding: 2px 5px;
+    border-radius: 4px;
+}
+
+.firewall-rule-action {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.firewall-rule-action.action-block {
+    background: rgba(255, 143, 143, 0.15);
+    color: var(--danger);
+}
+
+.firewall-rule-action.action-bypass {
+    background: rgba(87, 216, 163, 0.15);
+    color: var(--ok);
+}
+
+.firewall-rule-action.action-inspect {
+    background: rgba(78, 160, 255, 0.15);
+    color: var(--accent);
+}
+
+.firewall-rule-state {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-left: auto;
+}
+
+.firewall-rule-match {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-family: 'IBM Plex Mono', monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.firewall-rule-form {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+}
+
+.firewall-form-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.firewall-form-head h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-main);
+}
+
+.firewall-enabled-row {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.firewall-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.firewall-form-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.firewall-form-grid label span {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.firewall-form-grid input,
+.firewall-form-grid select {
+    padding: 8px 10px;
+    background: var(--bg-0);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-main);
+    font-size: 0.85rem;
+}
+
+.firewall-form-grid input:focus,
+.firewall-form-grid select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.firewall-form-grid h5 {
+    margin: 0 0 10px 0;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.firewall-form-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: auto;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.inline-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.inline-switch .switch {
+    width: 38px;
+    height: 20px;
+}
+
+.inline-switch .slider::before {
+    width: 14px;
+    height: 14px;
+}
+
+.inline-switch .switch input:checked + .slider::before {
+    transform: translateX(18px);
+}
+
+#firewall-section {
+    display: none !important;
+}
+
+#firewall-section:not(.hidden) {
+    display: flex !important;
+}
+
+@media (max-width: 900px) {
+    .firewall-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .firewall-rules-panel {
+        max-height: 280px;
     }
 }

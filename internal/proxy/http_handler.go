@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
 )
@@ -133,6 +134,46 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		bodyBytes, _ = io.ReadAll(r.Body)
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	}
+
+	fm := firewall.GetManager()
+	if fm.IsEnabled() {
+		action, blockMode, matched := fm.MatchTraffic(targetHost, sourceIP)
+		if matched {
+			switch action {
+			case firewall.ActionBlock:
+				reqID := logger.LogHTTPRequest(logger.RequestLogEntry{
+					SourceIP: sourceIP,
+					FQDN:     targetHost,
+					Method:   r.Method,
+					URL:      fullURL,
+					Headers:  r.Header,
+					Body:     bodyBytes,
+				})
+				logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s (firewall rule)", targetHost, sourceIP))
+				if blockMode == firewall.BlockModeDisplayPage {
+					writeBlockedPage(w, targetHost)
+				} else {
+					writePlainError(w, http.StatusForbidden, "Blocked")
+				}
+				logger.LogHTTPResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        targetHost,
+					Status:      "403 Forbidden",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Blocked by network policy"),
+					Truncated:   false,
+				})
+				return
+			case firewall.ActionBypass:
+				reqID := logger.LogBypassedRequest(sourceIP, targetHost)
+				h.handleBypassedHTTP(w, r, fullURL, targetHost, sourceIP, reqID)
+				return
+			case firewall.ActionInspect:
+				// Continue with normal inspection
+			}
+		}
 	}
 
 	if blockList != nil && blockList.Matches(targetHost) {
@@ -500,4 +541,62 @@ func copyHeaders(dst, src http.Header) {
 			dst.Add(name, value)
 		}
 	}
+}
+
+func writeBlockedPage(w http.ResponseWriter, host string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blocked</title>
+    <style>
+        body { font-family: 'Manrope', sans-serif; background: #050b16; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { text-align: center; padding: 40px; background: #0a1526; border-radius: 12px; border: 1px solid #1a2a40; max-width: 500px; }
+        h1 { color: #ff8f8f; margin-bottom: 20px; }
+        p { color: #8fa3b8; margin-bottom: 10px; }
+        .host { color: #4ea0ff; font-family: 'IBM Plex Mono', monospace; }
+        .footer { margin-top: 30px; font-size: 12px; color: #4a6080; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Access Blocked</h1>
+        <p>The URL <span class="host">%s</span> has been blocked by network policy.</p>
+        <p>If you believe this is an error, please contact your network administrator.</p>
+        <div class="footer">SSL Inspecting Router</div>
+    </div>
+</body>
+</html>`, host)
+	io.WriteString(w, html)
+}
+
+func (h *HTTPHandler) handleBypassedHTTP(w http.ResponseWriter, r *http.Request, fullURL, targetHost, sourceIP string, reqID int64) {
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, fullURL, r.Body)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Failed to create bypass proxy request: %v", err))
+		logger.LogBypassedResponse(reqID, sourceIP, targetHost)
+		return
+	}
+
+	copyHeaders(proxyReq.Header, r.Header)
+	if proxyReq.Host == "" {
+		proxyReq.Host = targetHost
+	}
+
+	resp, err := h.upstreamClient().Do(proxyReq)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Bypass upstream request failed: %v", err))
+		logger.LogBypassedResponse(reqID, sourceIP, targetHost)
+		return
+	}
+	defer resp.Body.Close()
+
+	copyHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+	logger.LogBypassedResponse(reqID, sourceIP, targetHost)
+	logger.LogDebug(fmt.Sprintf("HTTP bypassed: %s %s -> %d", r.Method, fullURL, resp.StatusCode))
 }

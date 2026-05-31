@@ -425,6 +425,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				writeJSONError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSONError(w, http.StatusUnauthorized, "authentication required")
+				return
+			}
+			if strings.Contains(err.Error(), "database") {
+				writeJSONError(w, http.StatusServiceUnavailable, "authentication service unavailable")
+				return
+			}
 			logger.LogError(fmt.Sprintf("dashboard authentication error: %v", err))
 			writeJSONError(w, http.StatusInternalServerError, "authentication service unavailable")
 			return

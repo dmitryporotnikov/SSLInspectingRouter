@@ -25,6 +25,7 @@
     "nav": {
       "traffic": "Трафик",
       "rewrites": "Редактор",
+      "firewall": "Фаервол",
       "users": "Пользователи"
     },
     "sidebar": {
@@ -49,7 +50,7 @@
       "artifactDirectoryPlaceholder": "Каталог артефактов",
       "setPath": "Задать путь",
       "wireguardClientConfig": "Конфигурация WireGuard",
-      "wireguardNoteHtml": "Вставьте конфигурацию или поместите файл <code>.conf</code> в папку <code>wireguard/</code>.",
+      "wireguardNoteHtml": "Вставьте конфигурацию WireGuard клиента выше. Конфигурация автоматически сохраняется в <code>/etc/wireguard/wg0.conf</code> и применяется при активации туннеля.",
       "saveWireGuardConfig": "Сохранить конфигурацию WireGuard",
       "tunnel": "Туннель",
       "torSection": "Выход через Tor",
@@ -297,6 +298,51 @@
     "errors": {
       "networkRequestFailed": "Сетевой запрос не выполнен",
       "requestFailed": "Запрос завершился ошибкой ({status})"
+    },
+    "firewall": {
+      "title": "Правила фаервола",
+      "modeLabel": "Режим фаервола",
+      "addRule": "Добавить правило",
+      "rules": "Правила",
+      "defaultNote": "Когда режим фаервола включен, весь трафик (HTTP и HTTPS) блокируется по умолчанию. Добавьте правила для разрешения или просмотра определенного трафика.",
+      "empty": "Правила фаервола не настроены.",
+      "newRuleTitle": "Новое правило фаервола",
+      "saveRule": "Сохранить правило",
+      "updateRule": "Обновить правило",
+      "deleteRule": "Удалить правило",
+      "cancelEdit": "Отмена",
+      "deleteConfirm": "Удалить это правило фаервола?",
+      "discardUnsavedChanges": "Отменить несохраненные изменения правила?",
+      "matchAll": "соответствует всему трафику",
+      "fields": {
+        "enabled": "Включено",
+        "action": "Действие",
+        "blockMode": "Режим блокировки",
+        "priority": "Приоритет (выше = первый)",
+        "host": "Хост",
+        "hostRegex": "Regex хоста",
+        "ip": "IP адрес",
+        "cidr": "CIDR",
+        "matchConditions": "Условия соответствия"
+      },
+      "actions": {
+        "block": "Блокировать",
+        "bypass": "Обход",
+        "inspect": "Просмотр"
+      },
+      "blockModes": {
+        "displayPage": "Показать страницу блокировки",
+        "silentDrop": "Тихий сброс"
+      },
+      "status": {
+        "saving": "Сохранение...",
+        "saved": "Сохранено.",
+        "deleting": "Удаление...",
+        "deleted": "Удалено."
+      },
+      "errors": {
+        "invalidAction": "Действие должно быть блокировать, обход или просмотр."
+      }
     }
   }
 }

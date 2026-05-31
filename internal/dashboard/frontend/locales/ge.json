@@ -25,6 +25,7 @@
     "nav": {
       "traffic": "Verkehr",
       "rewrites": "Umschreibungen",
+      "firewall": "Firewall",
       "users": "Benutzer"
     },
     "sidebar": {
@@ -49,7 +50,7 @@
       "artifactDirectoryPlaceholder": "Artefaktverzeichnis",
       "setPath": "Pfad festlegen",
       "wireguardClientConfig": "WireGuard-Client-Konfiguration",
-      "wireguardNoteHtml": "Fügen Sie eine Client-Konfiguration ein oder legen Sie eine <code>.conf</code>-Datei im Projektverzeichnis <code>wireguard/</code> ab.",
+      "wireguardNoteHtml": "Fügen Sie oben eine WireGuard-Client-Konfiguration ein. Die Konfiguration wird automatisch in <code>/etc/wireguard/wg0.conf</code> gespeichert und angewendet, wenn Sie den Tunnel aktivieren.",
       "saveWireGuardConfig": "WireGuard-Konfiguration speichern",
       "tunnel": "Tunnel",
       "torSection": "Tor-Ausgang",
@@ -297,6 +298,51 @@
     "errors": {
       "networkRequestFailed": "Netzwerkanfrage fehlgeschlagen",
       "requestFailed": "Anfrage fehlgeschlagen ({status})"
+    },
+    "firewall": {
+      "title": "Firewall-Regeln",
+      "modeLabel": "Firewall-Modus",
+      "addRule": "Regel hinzufügen",
+      "rules": "Regeln",
+      "defaultNote": "Wenn der Firewall-Modus aktiviert ist, wird aller Verkehr (HTTP und HTTPS) standardmäßig blockiert. Fügen Sie Regeln hinzu, um bestimmten Verkehr zu erlauben oder zu inspizieren.",
+      "empty": "Keine Firewall-Regeln konfiguriert.",
+      "newRuleTitle": "Neue Firewall-Regel",
+      "saveRule": "Regel speichern",
+      "updateRule": "Regel aktualisieren",
+      "deleteRule": "Regel löschen",
+      "cancelEdit": "Abbrechen",
+      "deleteConfirm": "Diese Firewall-Regel löschen?",
+      "discardUnsavedChanges": "Ungespeicherte Änderungen verwerfen?",
+      "matchAll": "entspricht allem Verkehr",
+      "fields": {
+        "enabled": "Aktiviert",
+        "action": "Aktion",
+        "blockMode": "Blockierungsmodus",
+        "priority": "Priorität (höher = zuerst)",
+        "host": "Host",
+        "hostRegex": "Host Regex",
+        "ip": "IP-Adresse",
+        "cidr": "CIDR",
+        "matchConditions": "Übereinstimmungsbedingungen"
+      },
+      "actions": {
+        "block": "Blockieren",
+        "bypass": "Umghehen",
+        "inspect": "Inspizieren"
+      },
+      "blockModes": {
+        "displayPage": "Blockierungsseite anzeigen",
+        "silentDrop": "Stilles Fallenlassen"
+      },
+      "status": {
+        "saving": "Speichern...",
+        "saved": "Gespeichert.",
+        "deleting": "Löschen...",
+        "deleted": "Gelöscht."
+      },
+      "errors": {
+        "invalidAction": "Aktion muss blockieren, umgehen oder inspizieren sein."
+      }
     }
   }
 }
