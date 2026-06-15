@@ -48,6 +48,7 @@ func main() {
 	bodyArtifactsDirFlag := flag.String("bodyartifactsdir", "", "directory for stored body artifacts (default: logs/body-artifacts)")
 	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
 	verboseFlag := flag.Bool("verbose", false, "enable verbose application logging")
+	sniOnlyFlag := flag.Bool("snionly", false, "SNI-only mode: forward HTTPS transparently (no MITM, original cert chain preserved) and log only SNI plus ClientHello metadata")
 	flag.Parse()
 
 	logger.SetConsoleRequestLogging(*webFlag == "")
@@ -180,6 +181,7 @@ func main() {
 
 	httpHandler := proxy.NewHTTPHandler(blockList, bypassList, rewriter)
 	httpsHandler := proxy.NewHTTPSHandler(certManager, blockList, bypassList, rewriter)
+	httpsHandler.SetSNIOnlyMode(*sniOnlyFlag)
 
 	if *webFlag != "" {
 		go func() {
@@ -197,6 +199,7 @@ func main() {
 					InspectOnlySources: inspectOnlyList,
 					PCAPPath:           *pcapFlag,
 					TruncateLog:        *truncateLog,
+					SNIOnlyMode:        *sniOnlyFlag,
 					Egress:             firewallManager,
 					WireGuard:          wireGuardManager,
 					Tor:                torManager,
@@ -222,6 +225,9 @@ func main() {
 	}
 	if artifactsEnabled, artifactsDir := logger.BinaryBodyArtifactStorage(); artifactsEnabled {
 		logger.LogInfo(fmt.Sprintf("Binary/compressed body artifacts enabled: %s", artifactsDir))
+	}
+	if *sniOnlyFlag {
+		logger.LogInfo("SNI-only mode enabled: HTTPS connections are tunnelled (no MITM); only SNI and ClientHello metadata are logged.")
 	}
 	logger.LogInfo("CA Path: ca-cert.pem")
 	logger.LogInfo("Logs: SQLite traffic.db in Logs directory")

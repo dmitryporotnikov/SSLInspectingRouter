@@ -586,6 +586,27 @@ func LogInspectionPausedResponse(reqID int64, sourceIP, fqdn string) {
 	insertResponse(reqID, sourceIP, fqdn, "INSPECTION PAUSED", "")
 }
 
+// LogSNIRequest records a tunnelled TLS request under SNI-only mode.
+// The metadata text (TLS version, ciphers, ALPN, extensions, etc.) is stored
+// in the request content column so the dashboard can display it without a
+// schema change.
+func LogSNIRequest(sourceIP, fqdn, metadata string) int64 {
+	if !trafficLoggingEnabled.Load() {
+		return 0
+	}
+	LogConsoleRequest(sourceIP, fqdn)
+	id, _ := insertRequest(sourceIP, fqdn, "SNI-ONLY", metadata)
+	return id
+}
+
+// LogSNIResponse records a tunnelled TLS response under SNI-only mode.
+func LogSNIResponse(reqID int64, sourceIP, fqdn, summary string) {
+	if !trafficLoggingEnabled.Load() {
+		return
+	}
+	insertResponse(reqID, sourceIP, fqdn, "SNI-ONLY", summary)
+}
+
 func insertRequest(sourceIP, fqdn, requestLine, content string) (int64, error) {
 	if DB == nil || !trafficLoggingEnabled.Load() {
 		return 0, nil

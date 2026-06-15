@@ -251,6 +251,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			BodyArtifactsDirectoryRaw string  `json:"body_artifacts_directory"`
 			TruncateLogEnabled        *bool   `json:"truncate_log_enabled"`
 			LogNothingEnabled         *bool   `json:"log_nothing_enabled"`
+			SNIOnlyMode               *bool   `json:"sni_only_mode"`
 			WireGuardEnabled          *bool   `json:"wireguard_enabled"`
 			WireGuardConfigRaw        *string `json:"wireguard_config"`
 			TorEnabled                *bool   `json:"tor_enabled"`
@@ -265,6 +266,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			strings.TrimSpace(payload.BodyArtifactsDirectoryRaw) == "" &&
 			payload.TruncateLogEnabled == nil &&
 			payload.LogNothingEnabled == nil &&
+			payload.SNIOnlyMode == nil &&
 			payload.WireGuardEnabled == nil &&
 			payload.WireGuardConfigRaw == nil &&
 			payload.TorEnabled == nil {
@@ -298,6 +300,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if payload.LogNothingEnabled != nil {
 			logger.SetTrafficLogging(!*payload.LogNothingEnabled)
+		}
+
+		if payload.SNIOnlyMode != nil && s.httpsHandler != nil {
+			s.httpsHandler.SetSNIOnlyMode(*payload.SNIOnlyMode)
+			s.sniOnlyMode = *payload.SNIOnlyMode
 		}
 
 		if payload.WireGuardConfigRaw != nil {
@@ -435,6 +442,7 @@ func (s *Server) currentStatusPayload() map[string]any {
 		"inspection_enabled":       inspectionEnabled,
 		"truncate_log_enabled":     s.truncateLog.Load(),
 		"log_nothing_enabled":      !logger.IsTrafficLoggingEnabled(),
+		"sni_only_mode":            s.sniOnlyMode,
 		"request_count":            requestCount,
 		"active_sessions":          activeSessions,
 		"session_ttl_seconds":      int64(s.sessionTTL.Seconds()),
@@ -594,6 +602,9 @@ func parseRequestLine(requestLine string) (method, url string) {
 	if line == "INSPECTION PAUSED" {
 		return "TUNNEL", "-"
 	}
+	if line == "SNI-ONLY" {
+		return "SNI", "-"
+	}
 
 	parts := strings.Fields(line)
 	if len(parts) == 0 {
@@ -627,6 +638,9 @@ func detectTrafficMode(requestLine, responseLine string) string {
 	if req == "INSPECTION PAUSED" || res == "INSPECTION PAUSED" {
 		return "paused"
 	}
+	if req == "SNI-ONLY" || res == "SNI-ONLY" {
+		return "sni"
+	}
 	if strings.EqualFold(res, "BLOCKED") || strings.HasPrefix(res, "403") {
 		return "blocked"
 	}
@@ -641,10 +655,12 @@ func trafficModeCondition(mode string) (string, bool) {
 		return `(r.request = 'BYPASSED' OR COALESCE(res.response, '') = 'BYPASSED')`, true
 	case "paused":
 		return `(r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED')`, true
+	case "sni":
+		return `(r.request = 'SNI-ONLY' OR COALESCE(res.response, '') = 'SNI-ONLY')`, true
 	case "blocked":
 		return `COALESCE(res.response, '') = 'BLOCKED'`, true
 	case "inspected":
-		return `NOT (r.request = 'BYPASSED' OR COALESCE(res.response, '') = 'BYPASSED' OR r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'BLOCKED' OR COALESCE(res.response, '') LIKE '403 %')`, true
+		return `NOT (r.request = 'BYPASSED' OR COALESCE(res.response, '') = 'BYPASSED' OR r.request = 'INSPECTION PAUSED' OR COALESCE(res.response, '') = 'INSPECTION PAUSED' OR r.request = 'SNI-ONLY' OR COALESCE(res.response, '') = 'SNI-ONLY' OR COALESCE(res.response, '') = 'BLOCKED' OR COALESCE(res.response, '') LIKE '403 %')`, true
 	default:
 		return "", false
 	}

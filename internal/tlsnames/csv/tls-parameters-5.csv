@@ -1,0 +1,13 @@
+Value,Description,DTLS-OK,Reference,Comment
+0-19,Unassigned (Requires coordination; see [RFC9443]),,[RFC5764][RFC9443],
+20,change_cipher_spec,Y,[RFC-ietf-tls-rfc8446bis-13],
+21,alert,Y,[RFC-ietf-tls-rfc8446bis-13],
+22,handshake,Y,[RFC-ietf-tls-rfc8446bis-13],
+23,application_data,Y,[RFC-ietf-tls-rfc8446bis-13],
+24,heartbeat,Y,[RFC6520],
+25,tls12_cid,Y,[RFC9146],
+26,ACK,Y,[RFC9147],
+27,return_routability_check,Y,[RFC9853],
+28-31,Unassigned,,,
+32-63,Reserved,,[RFC9147],
+64-255,Unassigned (Requires coordination; see [RFC9443]),,[RFC5764][RFC9443],

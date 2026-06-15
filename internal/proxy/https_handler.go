@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tlsnames"
 )
 
 // HTTPSHandler manages transparent HTTPS proxying.
@@ -34,6 +36,7 @@ type HTTPSHandler struct {
 	bypassList        *blocklist.BlockList
 	rewriter          *rewrites.Engine
 	inspectionEnabled atomic.Bool
+	sniOnlyMode       atomic.Bool
 	policyMu          sync.RWMutex
 	upstreamMu        sync.RWMutex
 }
@@ -45,6 +48,7 @@ type tunnelLogMode int
 const (
 	tunnelLogBypassed tunnelLogMode = iota
 	tunnelLogInspectionPaused
+	tunnelLogSNIOnly
 )
 
 // NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
@@ -94,6 +98,19 @@ func (h *HTTPSHandler) SetInspection(enabled bool) {
 // IsInspectionEnabled returns the current state of SSL inspection.
 func (h *HTTPSHandler) IsInspectionEnabled() bool {
 	return h.inspectionEnabled.Load()
+}
+
+// SetSNIOnlyMode toggles SNI-only mode. When enabled, HTTPS connections
+// are forwarded transparently to the original destination (no MITM, original
+// certificate chain is preserved) and only SNI plus ClientHello metadata are
+// captured in the logs.
+func (h *HTTPSHandler) SetSNIOnlyMode(enabled bool) {
+	h.sniOnlyMode.Store(enabled)
+}
+
+// IsSNIOnlyMode reports whether SNI-only mode is currently active.
+func (h *HTTPSHandler) IsSNIOnlyMode() bool {
+	return h.sniOnlyMode.Load()
 }
 
 func (h *HTTPSHandler) SetBlockList(blockList *blocklist.BlockList) {
@@ -242,6 +259,51 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 		return
 	}
 
+	if h.IsSNIOnlyMode() {
+		fm := firewall.GetManager()
+		if fm.IsEnabled() {
+			action, _, matched := fm.MatchTraffic(hostname, sourceIP)
+			if matched && action == firewall.ActionBlock {
+				logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (firewall rule)", hostname, sourceIP))
+				reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+				conn.Close()
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "BLOCKED",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Blocked by network policy"),
+					Truncated:   false,
+				})
+				return
+			}
+		}
+
+		blockList := h.currentBlockList()
+		if blockList != nil && blockList.Matches(hostname) {
+			logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
+			reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+			logger.LogHTTPSResponse(logger.ResponseLogEntry{
+				ReqID:       reqID,
+				SourceIP:    sourceIP,
+				FQDN:        hostname,
+				Status:      "BLOCKED",
+				Headers:     http.Header{},
+				BodyPreview: []byte("Blocked by policy"),
+				Truncated:   false,
+			})
+			return
+		}
+
+		info := parseClientHello(peekedBytes)
+		metadata := formatClientHelloMetadata(info, sourceIP, upstreamAddr, upstreamPort)
+		logger.LogInfo(fmt.Sprintf("SNI-only mode: tunneling %s from %s", hostname, sourceIP))
+		reqID := logger.LogSNIRequest(sourceIP, hostname, metadata)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogSNIOnly)
+		return
+	}
+
 	fm := firewall.GetManager()
 	if fm.IsEnabled() {
 		action, _, matched := fm.MatchTraffic(hostname, sourceIP)
@@ -380,15 +442,22 @@ func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP
 		logger.LogDebug(fmt.Sprintf("HTTPS tunnelled (inspection paused): %s", hostname))
 		return
 	}
+	if logMode == tunnelLogSNIOnly {
+		logger.LogDebug(fmt.Sprintf("HTTPS tunnelled (SNI-only): %s", hostname))
+		return
+	}
 	logger.LogDebug(fmt.Sprintf("HTTPS bypassed: %s", hostname))
 }
 
 func logTunnelResponse(reqID int64, sourceIP, hostname string, logMode tunnelLogMode) {
-	if logMode == tunnelLogInspectionPaused {
+	switch logMode {
+	case tunnelLogInspectionPaused:
 		logger.LogInspectionPausedResponse(reqID, sourceIP, hostname)
-		return
+	case tunnelLogSNIOnly:
+		logger.LogSNIResponse(reqID, sourceIP, hostname, "TUNNELED (SNI-ONLY)")
+	default:
+		logger.LogBypassedResponse(reqID, sourceIP, hostname)
 	}
-	logger.LogBypassedResponse(reqID, sourceIP, hostname)
 }
 
 // handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.
@@ -662,6 +731,206 @@ func parseSNIExtension(data []byte) string {
 	}
 
 	return string(data[pos : pos+nameLen])
+}
+
+// ClientHelloInfo captures the maximum amount of metadata we can extract from
+// a TLS ClientHello without performing MITM. It powers SNI-only mode.
+type ClientHelloInfo struct {
+	SNI             string
+	RecordVersion   uint16   // TLS record-layer version (bytes 1-2 of record)
+	ClientVersion   uint16   // ClientHello.legacy_version
+	CipherSuites    []uint16 // offered cipher suites
+	Compression     []byte   // offered compression methods
+	Extensions      []uint16 // extension type IDs in order
+	ALPN            []string // ALPN protocol list
+	SupportedGroups []uint16 // extension 10 (supported_groups)
+	SignatureAlgs   []uint16 // extension 13 (signature_algorithms)
+	ServerNameList  bool     // whether SNI list had more than one entry
+}
+
+// ponytail: minimal ClientHello walker. We only parse enough to populate
+// ClientHelloInfo; we do not validate every byte. If a field would need more
+// than a couple of length-checks to extract, we leave it empty.
+//
+// Upgrade path: replace with a maintained parser (e.g. ja3-style extractor)
+// if precision matters for fingerprinting.
+func parseClientHello(data []byte) ClientHelloInfo {
+	var info ClientHelloInfo
+	if len(data) < 43 || data[0] != 0x16 {
+		return info
+	}
+	if data[5] != 0x01 {
+		return info
+	}
+
+	info.RecordVersion = uint16(data[1])<<8 | uint16(data[2])
+	info.ClientVersion = uint16(data[9])<<8 | uint16(data[10])
+
+	pos := 43 // session_id length offset
+	if pos >= len(data) {
+		return info
+	}
+	sessionIDLen := int(data[pos])
+	pos += 1 + sessionIDLen
+	if pos+2 > len(data) {
+		return info
+	}
+
+	cipherSuitesLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+	if pos+cipherSuitesLen > len(data) {
+		return info
+	}
+	for i := 0; i+2 <= cipherSuitesLen; i += 2 {
+		info.CipherSuites = append(info.CipherSuites, uint16(data[pos+i])<<8|uint16(data[pos+i+1]))
+	}
+	pos += cipherSuitesLen
+
+	if pos >= len(data) {
+		return info
+	}
+	compressionLen := int(data[pos])
+	pos++
+	if pos+compressionLen > len(data) {
+		return info
+	}
+	info.Compression = append(info.Compression, data[pos:pos+compressionLen]...)
+	pos += compressionLen
+
+	if pos+2 > len(data) {
+		return info
+	}
+	extensionsLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+	endPos := pos + extensionsLen
+
+	for pos+4 <= endPos && pos+4 <= len(data) {
+		extType := uint16(data[pos])<<8 | uint16(data[pos+1])
+		extLen := int(data[pos+2])<<8 | int(data[pos+3])
+		pos += 4
+		if pos+extLen > len(data) {
+			break
+		}
+		info.Extensions = append(info.Extensions, extType)
+		extData := data[pos : pos+extLen]
+		switch extType {
+		case 0: // server_name
+			if listLen := int(extData[0])<<8 | int(extData[1]); listLen > 0 && 2+5 <= len(extData) {
+				// ponytail: SNI list length tells us if the client offered more
+				// than one server name; useful for fingerprinting.
+				info.ServerNameList = listLen > 0
+			}
+			info.SNI = parseSNIExtension(extData)
+		case 16: // ALPN
+			info.ALPN = parseALPNExtension(extData)
+		case 10: // supported_groups
+			info.SupportedGroups = parseUint16ListExtension(extData)
+		case 13: // signature_algorithms
+			info.SignatureAlgs = parseUint16ListExtension(extData)
+		}
+		pos += extLen
+	}
+
+	return info
+}
+
+func parseALPNExtension(data []byte) []string {
+	if len(data) < 2 {
+		return nil
+	}
+	listLen := int(data[0])<<8 | int(data[1])
+	if listLen+2 > len(data) {
+		return nil
+	}
+	pos := 2
+	end := 2 + listLen
+	var out []string
+	for pos < end && pos < len(data) {
+		strLen := int(data[pos])
+		pos++
+		if pos+strLen > len(data) {
+			break
+		}
+		out = append(out, string(data[pos:pos+strLen]))
+		pos += strLen
+	}
+	return out
+}
+
+func parseUint16ListExtension(data []byte) []uint16 {
+	if len(data) < 2 {
+		return nil
+	}
+	listLen := int(data[0])<<8 | int(data[1])
+	if listLen+2 > len(data) {
+		return nil
+	}
+	var out []uint16
+	for i := 0; i+2 <= listLen && 2+i+2 <= len(data); i += 2 {
+		out = append(out, uint16(data[2+i])<<8|uint16(data[2+i+1]))
+	}
+	return out
+}
+
+// formatClientHelloMetadata renders ClientHelloInfo for SQLite logging.
+// ponytail: text format keeps things greppable and avoids pulling in a
+// JSON encoder for the request/response columns. The format is also stable
+// for the dashboard traffic view.
+func formatClientHelloMetadata(info ClientHelloInfo, sourceIP, upstreamAddr string, upstreamPort int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "TLS Version (record): %s\n", tlsVersionName(info.RecordVersion))
+	fmt.Fprintf(&b, "TLS Version (client): %s\n", tlsVersionName(info.ClientVersion))
+	fmt.Fprintf(&b, "Source IP: %s\n", sourceIP)
+	if upstreamAddr != "" {
+		fmt.Fprintf(&b, "Original Destination: %s:%d\n", upstreamAddr, upstreamPort)
+	}
+	fmt.Fprintf(&b, "Cipher Suites (%d):\n", len(info.CipherSuites))
+	for _, c := range info.CipherSuites {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", c, tlsnames.CipherSuite(c))
+	}
+	fmt.Fprintf(&b, "Compression Methods (%d):\n", len(info.Compression))
+	for _, c := range info.Compression {
+		fmt.Fprintf(&b, "  0x%02x = %s\n", c, tlsnames.CompressionMethod(c))
+	}
+	fmt.Fprintf(&b, "ALPN (%d):\n", len(info.ALPN))
+	for _, p := range info.ALPN {
+		fmt.Fprintf(&b, "  %q = %s\n", p, tlsnames.ALPN(p))
+	}
+	fmt.Fprintf(&b, "Extensions (%d):\n", len(info.Extensions))
+	for _, e := range info.Extensions {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", e, tlsnames.ExtensionType(e))
+	}
+	fmt.Fprintf(&b, "Supported Groups (%d):\n", len(info.SupportedGroups))
+	for _, g := range info.SupportedGroups {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", g, tlsnames.SupportedGroup(g))
+	}
+	fmt.Fprintf(&b, "Signature Algorithms (%d):\n", len(info.SignatureAlgs))
+	for _, a := range info.SignatureAlgs {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", a, tlsnames.SignatureScheme(a))
+	}
+	if info.ServerNameList {
+		fmt.Fprintf(&b, "Multi-SNI: true\n")
+	}
+	return b.String()
+}
+
+// tlsVersionName converts a 16-bit TLS version identifier to its colloquial
+// name. Values not assigned by IANA fall back to the hex form.
+func tlsVersionName(v uint16) string {
+	switch v {
+	case 0x0300:
+		return "SSL 3.0"
+	case 0x0301:
+		return "TLS 1.0"
+	case 0x0302:
+		return "TLS 1.1"
+	case 0x0303:
+		return "TLS 1.2"
+	case 0x0304:
+		return "TLS 1.3"
+	default:
+		return fmt.Sprintf("0x%04x", v)
+	}
 }
 
 type replayConn struct {

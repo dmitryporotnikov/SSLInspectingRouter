@@ -56,6 +56,7 @@ type Server struct {
 	allowQUIC          bool
 	additionalTLSPorts []int
 	inspectOnlySources []string
+	sniOnlyMode        bool
 	pcapPath           string
 	truncateLog        atomic.Bool
 	sessionTTL         time.Duration
@@ -85,6 +86,7 @@ type RuntimeOptions struct {
 	InspectOnlySources []string
 	PCAPPath           string
 	TruncateLog        bool
+	SNIOnlyMode        bool
 	Egress             EgressRuntime
 	WireGuard          WireGuardRuntime
 	Tor                TorRuntime
@@ -124,6 +126,7 @@ func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler,
 	s.pcapPath = strings.TrimSpace(options.Runtime.PCAPPath)
 	s.additionalTLSPorts = append([]int(nil), options.Runtime.AdditionalTLSPorts...)
 	s.inspectOnlySources = append([]string(nil), options.Runtime.InspectOnlySources...)
+	s.sniOnlyMode = options.Runtime.SNIOnlyMode
 	s.truncateLog.Store(options.Runtime.TruncateLog)
 	s.egressRuntime = options.Runtime.Egress
 	s.wireguardRuntime = options.Runtime.WireGuard

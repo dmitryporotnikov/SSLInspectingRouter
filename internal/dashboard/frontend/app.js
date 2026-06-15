@@ -103,6 +103,8 @@ const dom = {
     truncateLogToggle: document.getElementById("truncate-log-toggle"),
     logNothingWrap: document.getElementById("log-nothing-wrap"),
     logNothingToggle: document.getElementById("log-nothing-toggle"),
+    sniOnlyWrap: document.getElementById("sni-only-wrap"),
+    sniOnlyToggle: document.getElementById("sni-only-toggle"),
     wireguardWrap: document.getElementById("wireguard-wrap"),
     wireguardToggle: document.getElementById("wireguard-toggle"),
     torWrap: document.getElementById("tor-wrap"),
@@ -798,6 +800,9 @@ function bindEvents() {
     dom.logNothingToggle.addEventListener("change", () => {
         void updateLogNothing(dom.logNothingToggle.checked);
     });
+    dom.sniOnlyToggle.addEventListener("change", () => {
+        void updateSNIOnlyMode(dom.sniOnlyToggle.checked);
+    });
     dom.wireguardToggle.addEventListener("change", () => {
         void updateWireGuard(dom.wireguardToggle.checked);
     });
@@ -1083,6 +1088,7 @@ function applyStatus(status) {
     dom.inspectionToggle.checked = !!status.inspection_enabled;
     dom.truncateLogToggle.checked = !!status.truncate_log_enabled;
     dom.logNothingToggle.checked = !!status.log_nothing_enabled;
+    dom.sniOnlyToggle.checked = !!status.sni_only_mode;
     dom.wireguardToggle.checked = wireguardEnabled;
     dom.torToggle.checked = torEnabled;
     dom.bodyArtifactsToggle.checked = !!status.body_artifacts_enabled;
@@ -1264,6 +1270,19 @@ async function updateLogNothing(enabled) {
         await updateDashboardSettings({ log_nothing_enabled: enabled });
     } catch (error) {
         dom.logNothingToggle.checked = !enabled;
+        alert(error.message);
+    }
+}
+
+async function updateSNIOnlyMode(enabled) {
+    if (!isAdmin()) {
+        return;
+    }
+
+    try {
+        await updateDashboardSettings({ sni_only_mode: enabled });
+    } catch (error) {
+        dom.sniOnlyToggle.checked = !enabled;
         alert(error.message);
     }
 }

@@ -189,6 +189,75 @@ The project root also contains a `wireguard/` directory for WireGuard client con
 | `sudo ./sslinspectingrouter -inspectonly <IP1,IP2>` | **Allowlist Mode:** Only intercept traffic from the specified source IPs. All other traffic is ignored and bypasses the inspection entirely. |
 | `sudo ./sslinspectingrouter -pcap <file>` | Export **decrypted** traffic to a PCAP file readable by Wireshark. Uses synthetic TCP streams to represent the HTTP/HTTPS payloads. |
 | `sudo ./sslinspectingrouter -verbose` | Enable verbose application logging to stderr. By default, standard logs are suppressed to keep the console clean. |
+| `sudo ./sslinspectingrouter -snionly` | **SNI-only mode:** Forward HTTPS transparently to the original destination (no MITM, original certificate chain preserved) and log only the SNI plus ClientHello metadata (TLS version, cipher suites, ALPN, extensions, supported groups, signature algorithms, source/original-destination addresses). |
+
+### SNI-only Mode
+
+SNI-only mode is a privacy-preserving observation mode: HTTPS connections are
+*not* decrypted. The router inspects the unencrypted `ClientHello`, records the
+SNI and any other ClientHello metadata it can extract, then forwards the
+connection untouched to the original destination. The remote server's
+certificate chain is delivered to the client exactly as it would be in a
+non-proxied connection.
+
+Logged per connection:
+
+* `fqdn` (SNI hostname) and source IP
+* TLS record-layer and ClientHello legacy version (rendered as `TLS 1.2` / `TLS 1.3` etc.)
+* Offered cipher suites, resolved to their IANA name (e.g. `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`, `TLS_AES_128_GCM_SHA256`)
+* Compression methods (e.g. `NULL`)
+* ALPN protocols, resolved to their IANA description (e.g. `HTTP/2 over TLS`, `HTTP/1.1`)
+* Extension type IDs, resolved to their IANA name (e.g. `server_name`, `application_layer_protocol_negotiation`, `supported_groups`, `signature_algorithms`)
+* Supported groups and signature algorithm IDs, resolved to their IANA name
+* Source IP and the original destination IP/port (from `SO_ORIGINAL_DST`)
+
+Unknown identifiers fall back to their raw hex form (`0xNNNN`) so new
+registrations remain visible.
+
+Rows in `Requests` are tagged `SNI-ONLY` and the response column is filled with
+`SNI-ONLY` once the tunnel is established. The dashboard filter exposes a
+dedicated `sni` mode. The dashboard runtime payload includes a boolean
+`sni_only_mode` so the active state is always visible.
+
+Sample log row content:
+
+```
+TLS Version (record): TLS 1.2
+TLS Version (client): TLS 1.2
+Source IP: 10.0.0.7
+Original Destination: 142.250.190.78:443
+Cipher Suites (4):
+  0x1301 = TLS_AES_128_GCM_SHA256
+  0x1303 = TLS_CHACHA20_POLY1305_SHA256
+  0xc02f = TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+  0xcca9 = TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+Compression Methods (1):
+  0x00 = NULL
+ALPN (2):
+  "h2" = HTTP/2 over TLS
+  "http/1.1" = HTTP/1.1
+Extensions (5):
+  0x0000 = server_name
+  0x0010 = application_layer_protocol_negotiation
+  0x000a = supported_groups
+  0x000b = ec_point_formats
+  0x000d = signature_algorithms
+Supported Groups (3):
+  0x001d = x25519
+  0x0017 = secp256r1
+  0x0018 = secp384r1
+Signature Algorithms (4):
+  0x0401 = rsa_pkcs1_sha256
+  0x0501 = rsa_pkcs1_sha384
+  0x0601 = rsa_pkcs1_sha512
+  0x0403 = ecdsa_secp256r1_sha256
+```
+
+**Example**
+
+```bash
+sudo ./sslinspectingrouter -snionly -web :3000
+```
 
 ### Web Dashboard Authentication
 

@@ -107,6 +107,13 @@
                                 <span class="slider"></span>
                             </label>
                         </div>
+                        <div class="switch-wrap compact-switch" id="sni-only-wrap">
+                            <span data-i18n="settings.sniOnlyMode"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="sni-only-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
                         <div class="switch-wrap compact-switch" id="wireguard-wrap">
                             <span data-i18n="settings.wireguardEgress"></span>
                             <label class="switch">
@@ -255,6 +262,7 @@
                             <option value="" data-i18n="traffic.modes.all"></option>
                             <option value="inspected" data-i18n="traffic.modes.inspected"></option>
                             <option value="paused" data-i18n="traffic.modes.paused"></option>
+                            <option value="sni" data-i18n="traffic.modes.sni"></option>
                             <option value="bypassed" data-i18n="traffic.modes.bypassed"></option>
                             <option value="blocked" data-i18n="traffic.modes.blocked"></option>
                         </select>

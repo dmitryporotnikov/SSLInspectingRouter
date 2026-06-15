@@ -43,6 +43,7 @@
       "inspection": "Inspection",
       "truncateLogBodies": "Truncate Log Bodies",
       "logNothing": "Log Nothing",
+      "sniOnlyMode": "SNI-only Mode",
       "wireguardEgress": "WireGuard Egress",
       "torEgress": "Tor Egress",
       "bodyArtifacts": "Body Artifacts",
@@ -107,6 +108,7 @@
         "all": "All Modes",
         "inspected": "Inspected",
         "paused": "Inspection Paused",
+        "sni": "SNI-only",
         "bypassed": "Bypassed",
         "blocked": "Blocked"
       },

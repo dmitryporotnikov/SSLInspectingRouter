@@ -43,6 +43,7 @@
       "inspection": "Просматривать",
       "truncateLogBodies": "Короткие логи",
       "logNothing": "Ничего не логировать",
+      "sniOnlyMode": "Только SNI",
       "wireguardEgress": "Выход через WireGuard",
       "torEgress": "Выход через Tor",
       "bodyArtifacts": "Артефакты",
@@ -107,6 +108,7 @@
         "all": "Все режимы",
         "inspected": "Просмотрен",
         "paused": "Просмотр приостановлена",
+        "sni": "Только SNI",
         "bypassed": "Обход",
         "blocked": "Заблокировано"
       },
