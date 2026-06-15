@@ -35,8 +35,8 @@ var (
 )
 
 const (
-	authLookupMaxAttempts = 5
-	authLookupBackoff     = 40 * time.Millisecond
+	authLookupMaxAttempts = 3
+	authLookupBackoff     = 50 * time.Millisecond
 )
 
 // DashboardUser is the authenticated user model exposed via API responses.
@@ -399,10 +399,32 @@ func (s *Server) authenticateRequest(r *http.Request) (*DashboardUser, string, e
 		user.LastLoginAt = &value
 	}
 
-	if _, err := s.db.Exec(`UPDATE Sessions SET last_seen_at = ? WHERE id = ?`, now, sessionID); err != nil && !isTransientSQLiteBusyError(err) {
+	if err := s.touchSession(sessionID, now); err != nil {
 		logger.LogDebug(fmt.Sprintf("dashboard session last_seen update failed: %v", err))
 	}
 	return &user, tokenHash, nil
+}
+
+// touchSession bumps last_seen_at with a short retry. The traffic logger can
+// hold the write lock; we don't want auth requests to fail just because the
+// proxy is busy. ponytail: 3 attempts × 50ms backoff is enough to ride out a
+// single traffic burst. Add a backoff here if real load exposes it.
+func (s *Server) touchSession(sessionID int64, now string) error {
+	var lastErr error
+	backoff := 50 * time.Millisecond
+	for attempt := 1; attempt <= 3; attempt++ {
+		_, err := s.db.Exec(`UPDATE Sessions SET last_seen_at = ? WHERE id = ?`, now, sessionID)
+		if err == nil {
+			return nil
+		}
+		if !isTransientSQLiteBusyError(err) {
+			return err
+		}
+		lastErr = err
+		time.Sleep(backoff)
+		backoff *= 2
+	}
+	return lastErr
 }
 
 func isTransientSQLiteBusyError(err error) bool {
@@ -429,12 +451,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				writeJSONError(w, http.StatusUnauthorized, "authentication required")
 				return
 			}
-			if strings.Contains(err.Error(), "database") {
-				writeJSONError(w, http.StatusServiceUnavailable, "authentication service unavailable")
+			if isTransientSQLiteBusyError(err) {
+				// Database is genuinely busy past the retry window; surface
+				// that distinctly so the client knows to retry.
+				writeJSONError(w, http.StatusServiceUnavailable, "authentication service temporarily unavailable")
 				return
 			}
 			logger.LogError(fmt.Sprintf("dashboard authentication error: %v", err))
-			writeJSONError(w, http.StatusInternalServerError, "authentication service unavailable")
+			writeJSONError(w, http.StatusInternalServerError, "authentication service error")
 			return
 		}
 

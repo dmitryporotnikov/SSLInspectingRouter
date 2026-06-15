@@ -28,6 +28,9 @@ var (
 	bodyArtifactMu      sync.RWMutex
 	bodyArtifactEnabled bool
 	bodyArtifactDir     string
+
+	checkpointStop chan struct{}
+	checkpointDone chan struct{}
 )
 
 const (
@@ -153,7 +156,11 @@ func InitLogger() error {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return fmt.Errorf("failed to create logs directory: %v", err)
 	}
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", dbPath))
+	// DSN pragmas: WAL for concurrent reader/writer, NORMAL sync is safe in
+	// WAL mode (no fsync per commit) and noticeably faster. busy_timeout
+	// gives contending readers/writers a chance to wait instead of bailing
+	// on SQLITE_BUSY immediately.
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=3000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on", dbPath))
 	if err != nil {
 		return fmt.Errorf("failed to open sqlite db: %v", err)
 	}
@@ -194,6 +201,22 @@ func InitLogger() error {
 	}
 	log.SetFlags(log.LstdFlags)
 
+	// Apply the connection-level PRAGMAs explicitly so a database file
+	// created by an older build picks them up on the next start. The DSN
+	// pragmas above only apply when SQLite creates a new file.
+	for _, pragma := range []string{
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA synchronous = NORMAL`,
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA busy_timeout = 3000`,
+	} {
+		if _, err := DB.Exec(pragma); err != nil {
+			LogError(fmt.Sprintf("failed to apply %s: %v", pragma, err))
+		}
+	}
+
+	startCheckpointLoop()
+
 	return nil
 }
 
@@ -216,7 +239,7 @@ func WipeTrafficDB() error {
 		return err
 	}
 
-	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=5000&_journal_mode=WAL", dbPath))
+	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?_busy_timeout=3000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on", dbPath))
 	if err != nil {
 		return fmt.Errorf("failed to open sqlite db: %v", err)
 	}
@@ -333,9 +356,57 @@ func WipeBodyArtifacts(customDir string) error {
 }
 
 func CloseLogger() {
+	stopCheckpointLoop()
 	if DB != nil {
 		DB.Close()
 	}
+}
+
+// startCheckpointLoop kicks off a background goroutine that periodically
+// runs a passive WAL checkpoint so the WAL file does not grow without
+// bound. PASSIVE is the only safe choice while readers and writers are
+// active — it never blocks. ponytail: a 5-minute interval is conservative;
+// tune up for write-heavy loads, down for storage-constrained devices.
+func startCheckpointLoop() {
+	if checkpointStop != nil {
+		return
+	}
+	checkpointStop = make(chan struct{})
+	checkpointDone = make(chan struct{})
+	go checkpointLoop(checkpointStop, checkpointDone)
+}
+
+func stopCheckpointLoop() {
+	if checkpointStop == nil {
+		return
+	}
+	close(checkpointStop)
+	<-checkpointDone
+	checkpointStop = nil
+	checkpointDone = nil
+}
+
+func checkpointLoop(stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			runCheckpoint()
+		}
+	}
+}
+
+func runCheckpoint() {
+	if DB == nil {
+		return
+	}
+	// PASSIVE: never blocks, never errors on contention. We don't care
+	// about the return values here — housekeeping only.
+	_, _ = DB.Exec(`PRAGMA wal_checkpoint(PASSIVE)`)
 }
 
 // GetTrafficDBSize returns the size of the SQLite database file in bytes.

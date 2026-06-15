@@ -67,3 +67,21 @@
 ## Cleanup is incomplete after Ctrl+C
 
 The shutdown handler runs in a goroutine and removes `SSLPROXY` / `SSL_DISPATCH` chains, `PREROUTING` / `OUTPUT` links, the `FORWARD ACCEPT` rules, and the active WireGuard tunnel. If a process is killed with `SIGKILL`, the cleanup won't run — use the manual iptables cleanup above.
+
+## "Authentication service unavailable" on the dashboard
+
+The traffic logger and the dashboard share a single SQLite database. Under heavy log volume, a dashboard write (session lookup, `last_seen_at` update) can briefly contend with the proxy's traffic writes and hit `SQLITE_BUSY`. The router handles this with:
+
+* WAL journal mode + `synchronous = NORMAL` (faster commits, still safe)
+* `busy_timeout = 3000` (a contended query waits up to 3s for the lock)
+* 3-attempt retry with backoff on the session lookup
+* 3-attempt retry with backoff on the `last_seen_at` touch
+
+If you still see the message, the most common causes are:
+
+1. A very hot log path overwhelming the disk. Drop to `-truncatelog` or `-log_nothing` while you reproduce.
+2. The DB is on a network or USB drive. Move it to local SSD/HDD.
+3. A long-running read transaction elsewhere. Avoid leaving the dashboard open on a slow filter while traffic is heavy.
+4. The WAL file grew large. The router runs a passive `wal_checkpoint` every 5 minutes; restart the process to force one if you need to reclaim space now.
+
+Genuine lock-timeout errors return `503` with `authentication service temporarily unavailable` and a distinct message — anything else returns `500` and is logged as a bug.
