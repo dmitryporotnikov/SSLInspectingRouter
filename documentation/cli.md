@@ -27,6 +27,8 @@ On the first run, the router generates `ca-cert.pem` and `ca-key.pem` in the pro
 | `-bodyartifactsdir <path>` | Custom directory for stored body artifacts (default `logs/body-artifacts`). |
 | `-pcap <file>` | Export **decrypted** traffic to a PCAP file readable in Wireshark. Synthetic TCP streams are used. |
 | `-snionly` | [SNI-only mode](snionly.md) — forward HTTPS transparently, log only SNI + ClientHello metadata. |
+| `-lan <iface>` | Dual-NIC mode: pin the LAN interface for transparent interception. PREROUTING is constrained with `-i <iface>` so only traffic ingressing on the LAN side is intercepted. Leave empty to intercept on all interfaces (single-NIC behavior). |
+| `-wan <iface>` | Dual-NIC mode: pin the WAN interface for outbound NAT. MASQUERADE is added with `-o <iface>`. Leave empty to auto-detect the default route. |
 | `-verbose` | Enable verbose application logging to stderr. Standard logs are suppressed by default. |
 
 ## Environment variables
@@ -58,6 +60,9 @@ sudo ./sslinspectingrouter -web :3000 -webtls
 
 # Passive observation, no MITM
 sudo ./sslinspectingrouter -snionly -web :3000
+
+# Dual-NIC gateway: intercept only traffic from the LAN side, NAT out the WAN
+sudo ./sslinspectingrouter -lan eth1 -wan eth0 -web :3000
 ```
 
 ## Runtime toggles

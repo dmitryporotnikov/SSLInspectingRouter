@@ -83,7 +83,8 @@
       "refresh": "Refresh",
       "close": "Close",
       "edit": "Edit",
-      "delete": "Delete"
+      "delete": "Delete",
+      "remove": "Remove"
     },
     "theme": {
       "light": "light",
@@ -306,7 +307,38 @@
       "modeLabel": "Firewall Mode",
       "addRule": "Add Rule",
       "rules": "Rules",
-      "defaultNote": "When firewall mode is enabled, all traffic (HTTP and HTTPS) is blocked by default. Add rules above to allow or inspect specific traffic.",
+      "tabs": {
+        "rules": "Rules",
+        "outbound": "Outbound Ports"
+      },
+      "outbound": {
+        "title": "Outbound Ports",
+        "description": "Restrict forwarded traffic to a specific list of destination ports. The list is enforced as a default-DROP iptables allowlist and is only active when Firewall Mode is on. Default rule set: HTTPS (TCP 443) and DNS (TCP/UDP 53).",
+        "empty": "No outbound ports configured.",
+        "table": {
+          "port": "Port",
+          "protocol": "Protocol"
+        },
+        "fields": {
+          "port": "Port",
+          "protocol": "Protocol"
+        },
+        "protocols": {
+          "tcp": "TCP",
+          "udp": "UDP"
+        },
+        "add": "Add",
+        "save": "Save Outbound Ports",
+        "status": {
+          "saving": "Saving...",
+          "saved": "Saved."
+        },
+        "errors": {
+          "invalidEntry": "Port must be 1-65535 and protocol must be TCP or UDP.",
+          "duplicate": "That port/protocol combination is already in the list."
+        }
+      },
+      "defaultNote": "Firewall mode applies only matching rules. Unmatched HTTP and HTTPS traffic continues normally.",
       "empty": "No firewall rules configured.",
       "newRuleTitle": "New Firewall Rule",
       "saveRule": "Save Rule",

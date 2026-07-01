@@ -252,6 +252,23 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 
 	logger.LogDebug(fmt.Sprintf("TLS target host: %s", hostname))
 
+	fm := firewall.GetManager()
+	if !fm.IsOutboundPortAllowed("tcp", upstreamPort) {
+		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (outbound port %d not allowed)", hostname, sourceIP, upstreamPort))
+		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+		conn.Close()
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "BLOCKED",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Blocked by outbound port policy"),
+			Truncated:   false,
+		})
+		return
+	}
+
 	if !h.IsInspectionEnabled() {
 		logger.LogInfo(fmt.Sprintf("Inspection disabled: tunneling %s from %s", hostname, sourceIP))
 		reqID := logger.LogInspectionPausedRequest(sourceIP, hostname)
@@ -304,7 +321,6 @@ func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
 		return
 	}
 
-	fm := firewall.GetManager()
 	if fm.IsEnabled() {
 		action, _, matched := fm.MatchTraffic(hostname, sourceIP)
 		if matched {

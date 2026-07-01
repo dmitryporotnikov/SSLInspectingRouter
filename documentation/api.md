@@ -23,6 +23,7 @@ Versioned JSON API under `/api/v1`. Auth is a session cookie returned by `POST /
 * `GET  /api/v1/firewall/status`
 * `GET  /api/v1/firewall/rules`
 * `GET  /api/v1/firewall/rules/{id}`
+* `GET  /api/v1/firewall/outbound-ports`
 
 ### Admin-only
 
@@ -35,6 +36,7 @@ Versioned JSON API under `/api/v1`. Auth is a session cookie returned by `POST /
 * `POST /api/v1/firewall/rules`
 * `PUT  /api/v1/firewall/rules/{id}`
 * `DELETE /api/v1/firewall/rules/{id}`
+* `PUT  /api/v1/firewall/outbound-ports` — replace outbound port allowlist
 * `GET  /api/v1/users`
 * `POST /api/v1/users`
 * `PUT  /api/v1/users/{id}`
@@ -123,3 +125,58 @@ Query parameters:
 | `mode` | string | — | `inspected`, `paused`, `sni`, `bypassed`, or `blocked`. |
 
 Response rows are `TrafficEntry` objects (id, timestamp, source_ip, host, method, url, status, mode, request_line).
+
+## `GET /api/v1/firewall/status`
+
+Returns whether the proxy-layer firewall mode is on. The `enabled` flag controls the proxy's host-based block/bypass/inspect engine; the iptables `SSL_OUTBOUND` chain tracks the same flag combined with the outbound port allowlist.
+
+```json
+{ "enabled": false }
+```
+
+## `GET /api/v1/firewall/rules`
+
+Returns the persisted host-based block/bypass/inspect rule list. Each rule has `id`, `priority`, `enabled`, `action` (`block` | `bypass` | `inspect`), `block_mode` (`display_page` | `silent_drop` for blocked rules), and a `match` object (`host`, `host_regex`, `ip`, `cidr`).
+
+```json
+{ "rules": [ ... ], "total": 3 }
+```
+
+## `POST /api/v1/firewall/rules`
+
+Create a rule. `action` must be `block`, `bypass`, or `inspect`. When `action` is `block` and `block_mode` is omitted, defaults to `display_page`. Response is `201 Created` with the persisted rule.
+
+## `PUT /api/v1/firewall/rules/{id}`
+
+Replace a rule. Same shape as POST.
+
+## `DELETE /api/v1/firewall/rules/{id}`
+
+Remove a rule. Returns `204 No Content`.
+
+## `GET /api/v1/firewall/outbound-ports`
+
+Returns the persisted outbound port allowlist and the current firewall enabled state. The list is enforced as a default-DROP iptables allowlist and is only installed when firewall mode is on.
+
+```json
+{
+  "enabled": true,
+  "ports": [
+    { "port": 443, "protocol": "tcp" },
+    { "port": 53, "protocol": "tcp" },
+    { "port": 53, "protocol": "udp" }
+  ]
+}
+```
+
+## `PUT /api/v1/firewall/outbound-ports`
+
+Replace the outbound port allowlist. The server validates `port` (1–65535) and `protocol` (`tcp` | `udp`), drops invalid entries, and collapses duplicates before persisting. The iptables `SSL_OUTBOUND` chain is rebuilt on save.
+
+```json
+{ "ports": [ { "port": 443, "protocol": "tcp" } ] }
+```
+
+## `PUT /api/v1/firewall/rules` (toggle)
+
+Toggles firewall mode. The body is `{ "enabled": true | false }`. Turning mode on applies explicit proxy rules and the outbound port allowlist without creating new rules.

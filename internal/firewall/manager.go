@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +21,19 @@ const (
 	ActionBypass  Action = "bypass"
 	ActionInspect Action = "inspect"
 )
+
+// firewallConfigKeyOutboundPorts is the firewall_config key used to
+// persist the JSON-encoded outbound port allowlist.
+const firewallConfigKeyOutboundPorts = "outbound_ports"
+
+// DefaultOutboundPorts is the rule set applied the first time firewall
+// mode is turned on with no stored configuration: HTTPS (tcp/443) and
+// DNS (tcp/53 + udp/53). Users can edit the list from the dashboard.
+var DefaultOutboundPorts = []OutboundPortEntry{
+	{Port: 443, Protocol: "tcp"},
+	{Port: 53, Protocol: "tcp"},
+	{Port: 53, Protocol: "udp"},
+}
 
 type BlockMode string
 
@@ -46,12 +61,14 @@ type Rule struct {
 }
 
 type Manager struct {
-	mu          sync.RWMutex
-	enabled     bool
-	rules       []Rule
-	nextID      int64
-	db          *sql.DB
-	onRuleChange func([]Rule)
+	mu              sync.RWMutex
+	enabled         bool
+	rules           []Rule
+	nextID          int64
+	db              *sql.DB
+	onRuleChange    func([]Rule)
+	onEnabledChange func(enabled bool, entries []OutboundPortEntry)
+	outboundPorts   []OutboundPortEntry
 }
 
 var defaultManager = &Manager{
@@ -71,7 +88,7 @@ func (m *Manager) Initialize(db *sql.DB) error {
 	if err := m.loadRules(); err != nil {
 		return fmt.Errorf("load firewall rules: %w", err)
 	}
-	logger.LogInfo("Firewall manager initialized with " + string(rune(len(m.rules))) + " rules")
+	logger.LogInfo(fmt.Sprintf("Firewall manager initialized with %d rules", len(m.rules)))
 	return nil
 }
 
@@ -183,6 +200,10 @@ func (m *Manager) loadRules() error {
 		if err := json.Unmarshal([]byte(matchJSON), &rule.Match); err != nil {
 			return err
 		}
+		if isLegacySeededBlockAllRule(rule) {
+			go m.deleteRuleFromDB(rule.ID)
+			continue
+		}
 		m.rules = append(m.rules, rule)
 		if rule.ID > maxID {
 			maxID = rule.ID
@@ -195,6 +216,23 @@ func (m *Manager) loadRules() error {
 	var enabledVal string
 	if err := row.Scan(&enabledVal); err == nil {
 		m.enabled = enabledVal == "true"
+	}
+
+	// Load outbound port allowlist (JSON-encoded). When no list is stored,
+	// the default HTTPS + DNS set is used so the first dashboard view is
+	// informative and matches the documented default rule set.
+	portsRow := m.queryRowWithRetry("SELECT value FROM firewall_config WHERE key = ?", firewallConfigKeyOutboundPorts)
+	var portsJSON string
+	if err := portsRow.Scan(&portsJSON); err == nil {
+		var entries []OutboundPortEntry
+		if err := json.Unmarshal([]byte(portsJSON), &entries); err == nil {
+			m.outboundPorts = entries
+		} else {
+			logger.LogInfo("Firewall: stored outbound ports were invalid; using defaults")
+		}
+	}
+	if len(m.outboundPorts) == 0 {
+		m.outboundPorts = append([]OutboundPortEntry(nil), DefaultOutboundPorts...)
 	}
 
 	return nil
@@ -241,6 +279,21 @@ func (m *Manager) saveEnabledState() error {
 	return err
 }
 
+// saveOutboundPorts persists the JSON-encoded outbound port allowlist to
+// the firewall_config table. Errors are logged and swallowed; in-memory
+// state remains the source of truth within the running process.
+func (m *Manager) saveOutboundPorts() error {
+	if m.db == nil {
+		return nil
+	}
+	encoded := mustMarshalJSON(m.outboundPorts)
+	_, err := m.execWithRetry(`
+		INSERT INTO firewall_config (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, firewallConfigKeyOutboundPorts, encoded)
+	return err
+}
+
 func mustMarshalJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
@@ -268,30 +321,65 @@ func (m *Manager) IsEnabled() bool {
 
 func (m *Manager) SetEnabled(enabled bool) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if enabled && !m.enabled && !m.hasDefaultBlockAllRule() {
-		defaultRule := Rule{
-			Priority:  -1000,
-			Enabled:   true,
-			Action:    ActionBlock,
-			BlockMode: BlockModeSilentDrop,
-			Match:     RuleMatch{},
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
-			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		}
-		m.rules = append(m.rules, defaultRule)
-		m.sortRulesByPriority()
-		// Save the default rule to database
-		go m.saveRule(defaultRule)
-	}
 	m.enabled = enabled
+	callback := m.onEnabledChange
+	entriesCopy := append([]OutboundPortEntry(nil), m.outboundPorts...)
+	m.mu.Unlock()
+
 	go m.saveEnabledState()
+	if callback != nil {
+		callback(enabled, entriesCopy)
+	}
 }
 
 func (m *Manager) SetOnRuleChange(f func([]Rule)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onRuleChange = f
+}
+
+// SetOnEnabledChange registers a callback that fires whenever firewall
+// mode is toggled or the outbound port allowlist changes. The callback
+// receives the new enabled state and the current allowlist (a copy).
+// This is the hook the dashboard uses to drive the iptables
+// SSL_OUTBOUND chain via the firewall.FirewallManager.
+func (m *Manager) SetOnEnabledChange(f func(enabled bool, entries []OutboundPortEntry)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onEnabledChange = f
+}
+
+// GetOutboundPorts returns a copy of the persisted outbound port allowlist.
+func (m *Manager) GetOutboundPorts() []OutboundPortEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]OutboundPortEntry, len(m.outboundPorts))
+	copy(out, m.outboundPorts)
+	return out
+}
+
+// SetOutboundPorts replaces the outbound port allowlist. Entries with
+// invalid ports or protocols are dropped; duplicates are collapsed. The
+// list is persisted to the firewall_config table and, when firewall mode
+// is on, the SSL_OUTBOUND chain is re-applied via the OnEnabledChange
+// callback.
+func (m *Manager) SetOutboundPorts(entries []OutboundPortEntry) {
+	normalized := normalizeOutboundEntries(entries)
+	if len(normalized) == 0 {
+		normalized = append([]OutboundPortEntry(nil), DefaultOutboundPorts...)
+	}
+
+	m.mu.Lock()
+	m.outboundPorts = normalized
+	enabled := m.enabled
+	callback := m.onEnabledChange
+	entriesCopy := append([]OutboundPortEntry(nil), m.outboundPorts...)
+	m.mu.Unlock()
+
+	go m.saveOutboundPorts()
+	if callback != nil {
+		callback(enabled, entriesCopy)
+	}
 }
 
 func (m *Manager) GetRules() []Rule {
@@ -323,7 +411,7 @@ func (m *Manager) AddRule(rule Rule) Rule {
 	m.rules = append(m.rules, rule)
 	m.sortRulesByPriority()
 	m.notifyRuleChange()
-	logger.LogInfo("Firewall rule added: id=" + string(rune(rule.ID)) + " action=" + string(rule.Action))
+	logger.LogInfo(fmt.Sprintf("Firewall rule added: id=%d action=%s", rule.ID, rule.Action))
 	go m.saveRule(rule)
 	return rule
 }
@@ -341,7 +429,7 @@ func (m *Manager) UpdateRule(id int64, updates Rule) *Rule {
 			m.rules[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			m.sortRulesByPriority()
 			m.notifyRuleChange()
-			logger.LogInfo("Firewall rule updated: id=" + string(rune(id)))
+			logger.LogInfo(fmt.Sprintf("Firewall rule updated: id=%d", id))
 			go m.saveRule(m.rules[i])
 			return &m.rules[i]
 		}
@@ -356,7 +444,7 @@ func (m *Manager) DeleteRule(id int64) bool {
 		if rule.ID == id {
 			m.rules = append(m.rules[:i], m.rules[i+1:]...)
 			m.notifyRuleChange()
-			logger.LogInfo("Firewall rule deleted: id=" + string(rune(id)))
+			logger.LogInfo(fmt.Sprintf("Firewall rule deleted: id=%d", id))
 			go m.deleteRuleFromDB(id)
 			return true
 		}
@@ -370,7 +458,7 @@ func (m *Manager) SetRules(rules []Rule) {
 	m.rules = rules
 	m.sortRulesByPriority()
 	m.notifyRuleChange()
-	logger.LogInfo("Firewall rules replaced: count=" + string(rune(len(rules))))
+	logger.LogInfo(fmt.Sprintf("Firewall rules replaced: count=%d", len(rules)))
 }
 
 func (m *Manager) sortRulesByPriority() {
@@ -385,6 +473,28 @@ func (m *Manager) notifyRuleChange() {
 		copy(rulesCopy, m.rules)
 		go m.onRuleChange(rulesCopy)
 	}
+}
+
+func (m *Manager) IsOutboundPortAllowed(protocol string, port int) bool {
+	if port < 1 || port > 65535 {
+		return false
+	}
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if protocol != "tcp" && protocol != "udp" {
+		return false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.enabled {
+		return true
+	}
+	for _, entry := range m.outboundPorts {
+		if entry.Port == port && strings.EqualFold(entry.Protocol, protocol) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) MatchTraffic(host, ip string) (action Action, blockMode BlockMode, matched bool) {
@@ -441,19 +551,40 @@ func (m *Manager) ruleMatches(rule Rule, host, ip string) bool {
 	return false
 }
 
-func matchHostRegex(host, pattern string) bool {
-	return false
+func isLegacySeededBlockAllRule(rule Rule) bool {
+	return rule.ID == 0 &&
+		rule.Priority == -1000 &&
+		rule.Enabled &&
+		rule.Action == ActionBlock &&
+		rule.BlockMode == BlockModeSilentDrop &&
+		rule.Match.Host == "" &&
+		rule.Match.HostRegex == "" &&
+		rule.Match.IP == "" &&
+		rule.Match.CIDR == ""
 }
 
-func (m *Manager) hasDefaultBlockAllRule() bool {
-	for _, rule := range m.rules {
-		if rule.Priority == -1000 && rule.Action == ActionBlock && rule.Match.Host == "" && rule.Match.HostRegex == "" && rule.Match.IP == "" && rule.Match.CIDR == "" {
-			return true
-		}
+func matchHostRegex(host, pattern string) bool {
+	if host == "" || pattern == "" {
+		return false
 	}
-	return false
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false
+	}
+	return re.MatchString(host)
 }
 
 func matchCIDR(ip, cidr string) bool {
-	return false
+	if ip == "" || cidr == "" {
+		return false
+	}
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return false
+	}
+	return ipNet.Contains(parsedIP)
 }

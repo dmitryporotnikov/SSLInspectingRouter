@@ -117,3 +117,53 @@ func (s *Server) handleFirewallRuleByID(w http.ResponseWriter, r *http.Request) 
 		writeMethodNotAllowed(w, http.MethodGet, http.MethodPut, http.MethodDelete)
 	}
 }
+
+// handleOutboundPorts manages the firewall outbound port allowlist used by
+// the SSL_OUTBOUND iptables chain. GET returns the current enabled state
+// and the persisted list. PUT replaces the list (validated, de-duplicated,
+// normalized) and triggers re-application of the iptables chain.
+func (s *Server) handleOutboundPorts(w http.ResponseWriter, r *http.Request) {
+	user := userFromContext(r.Context())
+	if user == nil || user.Role != "admin" {
+		writeJSONError(w, http.StatusForbidden, "admin role required")
+		return
+	}
+
+	fm := firewall.GetManager()
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled": fm.IsEnabled(),
+			"ports":   fm.GetOutboundPorts(),
+		})
+	case http.MethodPut:
+		var payload struct {
+			Ports []firewall.OutboundPortEntry `json:"ports"`
+		}
+		if err := decodeJSONBody(r, &payload); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid JSON payload")
+			return
+		}
+		// Validation: reject when any entry is clearly malformed so the
+		// client gets actionable feedback. The Manager also normalizes
+		// (drops invalid entries, collapses duplicates) before persisting.
+		for _, p := range payload.Ports {
+			if p.Protocol != "tcp" && p.Protocol != "udp" {
+				writeJSONError(w, http.StatusBadRequest, "protocol must be 'tcp' or 'udp'")
+				return
+			}
+			if p.Port < 1 || p.Port > 65535 {
+				writeJSONError(w, http.StatusBadRequest, "port must be between 1 and 65535")
+				return
+			}
+		}
+		fm.SetOutboundPorts(payload.Ports)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"enabled": fm.IsEnabled(),
+			"ports":   fm.GetOutboundPorts(),
+		})
+	default:
+		writeMethodNotAllowed(w, http.MethodGet, http.MethodPut)
+	}
+}

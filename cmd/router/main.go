@@ -49,6 +49,8 @@ func main() {
 	pcapFlag := flag.String("pcap", "", "path to write PCAP file of decrypted traffic")
 	verboseFlag := flag.Bool("verbose", false, "enable verbose application logging")
 	sniOnlyFlag := flag.Bool("snionly", false, "SNI-only mode: forward HTTPS transparently (no MITM, original cert chain preserved) and log only SNI plus ClientHello metadata")
+	lanInterfaceFlag := flag.String("lan", "", "LAN interface name for dual-NIC mode; constrains transparent interception to ingress on this interface (e.g. eth1). Leave empty for single-NIC mode (intercept on all interfaces).")
+	wanInterfaceFlag := flag.String("wan", "", "WAN interface name for dual-NIC mode; pins MASQUERADE to this interface (e.g. eth0). Leave empty to auto-detect the default route.")
 	flag.Parse()
 
 	logger.SetConsoleRequestLogging(*webFlag == "")
@@ -114,6 +116,14 @@ func main() {
 	}
 
 	firewallManager := firewall.NewFirewallManager(HTTP_PROXY_PORT, HTTPS_PROXY_PORT)
+	if lan := strings.TrimSpace(*lanInterfaceFlag); lan != "" {
+		firewallManager.SetLANInterface(lan)
+	}
+	if wan := strings.TrimSpace(*wanInterfaceFlag); wan != "" {
+		if err := firewallManager.SetEgressInterface(wan); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to pin WAN interface to %s: %v", wan, err))
+		}
+	}
 	if len(additionalTLSPorts) > 0 {
 		firewallManager.EnableAdditionalTLSPorts(additionalTLSPorts)
 	}
@@ -201,6 +211,7 @@ func main() {
 					TruncateLog:        *truncateLog,
 					SNIOnlyMode:        *sniOnlyFlag,
 					Egress:             firewallManager,
+					OutboundPorts:      firewallManager,
 					WireGuard:          wireGuardManager,
 					Tor:                torManager,
 				},
@@ -212,6 +223,12 @@ func main() {
 	}
 
 	logger.LogInfo("Router is active.")
+	if lan := strings.TrimSpace(*lanInterfaceFlag); lan != "" {
+		logger.LogInfo(fmt.Sprintf("LAN ingress pinned to %s (transparent interception limited to this interface)", lan))
+	}
+	if wan := strings.TrimSpace(*wanInterfaceFlag); wan != "" {
+		logger.LogInfo(fmt.Sprintf("WAN egress pinned to %s (MASQUERADE)", wan))
+	}
 	logger.LogInfo(fmt.Sprintf("HTTP  -> :%d", HTTP_PROXY_PORT))
 	logger.LogInfo(fmt.Sprintf("HTTPS -> :%d", HTTPS_PROXY_PORT))
 	if len(additionalTLSPorts) > 0 {

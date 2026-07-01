@@ -24,6 +24,11 @@ const state = {
         rules: [],
         selectedRuleId: null,
         dirty: false,
+        activeSubTab: "firewall-rules",
+        outbound: {
+            ports: [],
+            dirty: false,
+        },
     },
     traffic: {
         items: [],
@@ -92,6 +97,17 @@ const dom = {
     firewallCancelBtn: document.getElementById("firewall-cancel-btn"),
     firewallSaveStatus: document.getElementById("firewall-save-status"),
     firewallFormError: document.getElementById("firewall-form-error"),
+    firewallRulesPane: document.getElementById("firewall-rules-pane"),
+    firewallOutboundPane: document.getElementById("firewall-outbound-pane"),
+    firewallSubnavButtons: Array.from(document.querySelectorAll("#firewall-subnav .subnav-item")),
+    firewallOutboundRows: document.getElementById("firewall-outbound-rows"),
+    firewallOutboundEmpty: document.getElementById("firewall-outbound-empty"),
+    firewallOutboundForm: document.getElementById("firewall-outbound-form"),
+    firewallOutboundPort: document.getElementById("firewall-outbound-port"),
+    firewallOutboundProtocol: document.getElementById("firewall-outbound-protocol"),
+    firewallOutboundSaveBtn: document.getElementById("firewall-outbound-save-btn"),
+    firewallOutboundSaveStatus: document.getElementById("firewall-outbound-save-status"),
+    firewallOutboundFormError: document.getElementById("firewall-outbound-form-error"),
     currentUser: document.getElementById("current-user"),
     currentRole: document.getElementById("current-role"),
     themeToggle: document.getElementById("theme-toggle"),
@@ -680,6 +696,27 @@ function switchSection(section) {
         renderRewriteEditor();
     } else if (section === "firewall") {
         renderFirewallTab();
+        renderFirewallSubTab();
+    }
+}
+
+function switchFirewallSubTab(name) {
+    if (!name) name = "firewall-rules";
+    state.firewall.activeSubTab = name;
+    renderFirewallSubTab();
+}
+
+function renderFirewallSubTab() {
+    const name = state.firewall.activeSubTab || "firewall-rules";
+    dom.firewallSubnavButtons.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.subtab === name);
+    });
+    dom.firewallRulesPane.classList.toggle("hidden", name !== "firewall-rules");
+    dom.firewallOutboundPane.classList.toggle("hidden", name !== "firewall-outbound");
+    dom.firewallAddRuleBtn.classList.toggle("hidden", name !== "firewall-rules");
+
+    if (name === "firewall-outbound") {
+        renderOutboundPortsPane();
     }
 }
 
@@ -887,6 +924,19 @@ function bindEvents() {
     dom.firewallCancelBtn.addEventListener("click", () => {
         resetFirewallRuleForm();
         renderFirewallTab();
+    });
+    dom.firewallSubnavButtons.forEach((btn) => {
+        btn.addEventListener("click", () => switchFirewallSubTab(btn.dataset.subtab));
+    });
+    dom.firewallOutboundForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const port = Number(dom.firewallOutboundPort.value);
+        const protocol = dom.firewallOutboundProtocol.value;
+        addOutboundPortRow(port, protocol);
+        dom.firewallOutboundPort.value = "";
+    });
+    dom.firewallOutboundSaveBtn.addEventListener("click", () => {
+        void saveOutboundPorts();
     });
     dom.firewallRuleAction.addEventListener("change", () => {
         const action = dom.firewallRuleAction.value;
@@ -2397,6 +2447,9 @@ async function loadFirewallStatus() {
         dom.firewallModeToggle.checked = state.firewall.enabled;
         await loadFirewallRules();
     } catch (_error) {}
+    try {
+        await loadOutboundPorts();
+    } catch (_error) {}
 }
 
 async function loadFirewallRules() {
@@ -2406,6 +2459,127 @@ async function loadFirewallRules() {
         dom.firewallRulesCount.textContent = String(state.firewall.rules.length);
         renderFirewallRulesList();
     } catch (_error) {}
+}
+
+async function loadOutboundPorts() {
+    if (state.firewall.outbound.dirty) return;
+    try {
+        const response = await apiRequest("/api/v1/firewall/outbound-ports");
+        const ports = Array.isArray(response.ports) ? response.ports : [];
+        state.firewall.outbound.ports = ports.map(normalizeOutboundPort).filter(Boolean);
+        state.firewall.outbound.dirty = false;
+        renderOutboundPortsPane();
+    } catch (_error) {}
+}
+
+function normalizeOutboundPort(entry) {
+    if (!entry || typeof entry.port !== "number") return null;
+    const port = entry.port;
+    const proto = String(entry.protocol || "").toLowerCase();
+    if ((proto !== "tcp" && proto !== "udp") || port < 1 || port > 65535) return null;
+    return { port, protocol: proto };
+}
+
+function renderOutboundPortsPane() {
+    const ports = state.firewall.outbound.ports;
+    clearElement(dom.firewallOutboundRows);
+
+    if (!ports.length) {
+        dom.firewallOutboundEmpty.classList.remove("hidden");
+    } else {
+        dom.firewallOutboundEmpty.classList.add("hidden");
+    }
+
+    const fragment = document.createDocumentFragment();
+    ports.forEach((entry, index) => {
+        const row = document.createElement("tr");
+
+        const portCell = document.createElement("td");
+        portCell.textContent = String(entry.port);
+        row.appendChild(portCell);
+
+        const protoCell = document.createElement("td");
+        protoCell.textContent = entry.protocol.toUpperCase();
+        row.appendChild(protoCell);
+
+        const actionCell = document.createElement("td");
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn btn-ghost";
+        removeBtn.textContent = t("actions.remove");
+        removeBtn.addEventListener("click", () => removeOutboundPortRow(index));
+        actionCell.appendChild(removeBtn);
+        row.appendChild(actionCell);
+
+        fragment.appendChild(row);
+    });
+    dom.firewallOutboundRows.appendChild(fragment);
+
+    dom.firewallOutboundSaveBtn.disabled = !state.firewall.outbound.dirty;
+}
+
+function outboundPortsKey(entry) {
+    return entry.protocol + "/" + entry.port;
+}
+
+function addOutboundPortRow(port, protocol) {
+    const entry = normalizeOutboundPort({ port, protocol });
+    if (!entry) {
+        showOutboundFormError(t("firewall.outbound.errors.invalidEntry"));
+        return;
+    }
+    const ports = state.firewall.outbound.ports;
+    const exists = ports.some((p) => outboundPortsKey(p) === outboundPortsKey(entry));
+    if (exists) {
+        showOutboundFormError(t("firewall.outbound.errors.duplicate"));
+        return;
+    }
+    ports.push(entry);
+    state.firewall.outbound.dirty = true;
+    hideOutboundFormError();
+    renderOutboundPortsPane();
+}
+
+function removeOutboundPortRow(index) {
+    const ports = state.firewall.outbound.ports;
+    if (index < 0 || index >= ports.length) return;
+    ports.splice(index, 1);
+    state.firewall.outbound.dirty = true;
+    renderOutboundPortsPane();
+}
+
+function showOutboundFormError(message) {
+    dom.firewallOutboundFormError.textContent = message;
+    dom.firewallOutboundFormError.classList.remove("hidden");
+}
+
+function hideOutboundFormError() {
+    dom.firewallOutboundFormError.classList.add("hidden");
+    dom.firewallOutboundFormError.textContent = "";
+}
+
+async function saveOutboundPorts() {
+    if (!isAdmin()) return;
+    hideOutboundFormError();
+    dom.firewallOutboundSaveStatus.textContent = t("firewall.outbound.status.saving");
+    dom.firewallOutboundSaveBtn.disabled = true;
+
+    try {
+        const response = await apiRequest("/api/v1/firewall/outbound-ports", {
+            method: "PUT",
+            body: { ports: state.firewall.outbound.ports },
+        });
+        state.firewall.outbound.ports = (Array.isArray(response.ports) ? response.ports : [])
+            .map(normalizeOutboundPort)
+            .filter(Boolean);
+        state.firewall.outbound.dirty = false;
+        renderOutboundPortsPane();
+        dom.firewallOutboundSaveStatus.textContent = t("firewall.outbound.status.saved");
+    } catch (error) {
+        dom.firewallOutboundSaveStatus.textContent = "";
+        showOutboundFormError(error.message);
+        dom.firewallOutboundSaveBtn.disabled = false;
+    }
 }
 
 function renderFirewallRulesList() {

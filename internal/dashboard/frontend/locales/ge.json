@@ -82,7 +82,8 @@
       "refresh": "Aktualisieren",
       "close": "Schließen",
       "edit": "Bearbeiten",
-      "delete": "Löschen"
+      "delete": "Löschen",
+      "remove": "Entfernen"
     },
     "theme": {
       "light": "hell",
@@ -304,7 +305,38 @@
       "modeLabel": "Firewall-Modus",
       "addRule": "Regel hinzufügen",
       "rules": "Regeln",
-      "defaultNote": "Wenn der Firewall-Modus aktiviert ist, wird aller Verkehr (HTTP und HTTPS) standardmäßig blockiert. Fügen Sie Regeln hinzu, um bestimmten Verkehr zu erlauben oder zu inspizieren.",
+      "tabs": {
+        "rules": "Regeln",
+        "outbound": "Ausgehende Ports"
+      },
+      "outbound": {
+        "title": "Ausgehende Ports",
+        "description": "Beschränken Sie weitergeleiteten Verkehr auf eine Liste erlaubter Zielports. Die Liste wird als iptables-Allowlist mit DROP-Standardaktion erzwungen und ist nur aktiv, wenn der Firewall-Modus eingeschaltet ist. Standardregelsatz: HTTPS (TCP 443) und DNS (TCP/UDP 53).",
+        "empty": "Keine ausgehenden Ports konfiguriert.",
+        "table": {
+          "port": "Port",
+          "protocol": "Protokoll"
+        },
+        "fields": {
+          "port": "Port",
+          "protocol": "Protokoll"
+        },
+        "protocols": {
+          "tcp": "TCP",
+          "udp": "UDP"
+        },
+        "add": "Hinzufügen",
+        "save": "Ausgehende Ports speichern",
+        "status": {
+          "saving": "Speichern...",
+          "saved": "Gespeichert."
+        },
+        "errors": {
+          "invalidEntry": "Port muss 1-65535 sein, Protokoll TCP oder UDP.",
+          "duplicate": "Diese Kombination aus Port und Protokoll ist bereits in der Liste."
+        }
+      },
+      "defaultNote": "Der Firewall-Modus wendet nur passende Regeln an. Nicht passender HTTP- und HTTPS-Verkehr laeuft normal weiter.",
       "empty": "Keine Firewall-Regeln konfiguriert.",
       "newRuleTitle": "Neue Firewall-Regel",
       "saveRule": "Regel speichern",

@@ -49,6 +49,24 @@ Click any row to open a detail view with the full request/response.
 
 The Rewrites tab is a CRUD UI on top of `rewrites/dashboard-managed.rules.json`. External JSON files in `rewrites/` are read-only. Save triggers an immediate engine reload. See [Response Rewrites](../rewrites/README.md) for rule format.
 
+## Firewall
+
+Admin-only. Two sub-tabs under **Firewall**:
+
+* **Rules** — the existing host-based block / bypass / inspect rule list. The **Firewall Mode** toggle enables the proxy-level engine; only explicit rules block, bypass, or force inspection.
+* **Outbound Ports** — destination-port allowlist for forwarded traffic. The default rule set is HTTPS (TCP 443) and DNS (TCP/UDP 53). When Firewall Mode is on, the engine installs an iptables `SSL_OUTBOUND` chain in the `filter` table that accepts the listed (protocol, port) pairs and drops everything else, and the FORWARD chain is rewired to consult it. When Firewall Mode is off, the chain is removed and FORWARD is restored to accept-all.
+
+The outbound port list is persisted in `firewall_config` and re-applied on every startup, so a previously enabled state survives restarts. See the [API reference](api.md) for the request/response shape.
+
+## Dual-NIC mode
+
+The router can be run as a true gateway with separate WAN and LAN interfaces by passing `-lan <iface>` and `-wan <iface>` at startup:
+
+* `-lan` constrains the iptables `PREROUTING → SSL_DISPATCH` jump with `-i <iface>`, so only traffic ingressing on the LAN side is intercepted.
+* `-wan` pins the outbound `MASQUERADE` rule to `-o <iface>` instead of auto-detecting the default route.
+
+Both flags are optional. With neither flag the router runs in single-NIC mode (intercept on all interfaces, auto-detect WAN). See [CLI flags](cli.md).
+
 ## Users
 
 Admin-only. Manage accounts, roles, and passwords. The first user is seeded from `SIR_ADMIN_USER` / `SIR_ADMIN_PASS` and cannot be deleted while it is the only admin.

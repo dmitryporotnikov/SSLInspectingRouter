@@ -51,6 +51,7 @@ type Server struct {
 	dnsProxy           *dnsproxy.DNSProxy
 	rewriter           *rewrites.Engine
 	egressRuntime      EgressRuntime
+	outboundPorts      OutboundPortsRuntime
 	wireguardRuntime   WireGuardRuntime
 	torRuntime         TorRuntime
 	allowQUIC          bool
@@ -88,6 +89,7 @@ type RuntimeOptions struct {
 	TruncateLog        bool
 	SNIOnlyMode        bool
 	Egress             EgressRuntime
+	OutboundPorts      OutboundPortsRuntime
 	WireGuard          WireGuardRuntime
 	Tor                TorRuntime
 }
@@ -96,6 +98,13 @@ type EgressRuntime interface {
 	SetEgressInterface(string) error
 	EgressInterface() string
 	DefaultEgressInterface() string
+}
+
+// OutboundPortsRuntime applies the firewall outbound port allowlist to
+// the host. The same *firewall.FirewallManager satisfies both
+// EgressRuntime and OutboundPortsRuntime.
+type OutboundPortsRuntime interface {
+	ApplyOutboundPorts(enabled bool, entries []firewall.OutboundPortEntry) error
 }
 
 type WireGuardRuntime interface {
@@ -129,6 +138,7 @@ func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler,
 	s.sniOnlyMode = options.Runtime.SNIOnlyMode
 	s.truncateLog.Store(options.Runtime.TruncateLog)
 	s.egressRuntime = options.Runtime.Egress
+	s.outboundPorts = options.Runtime.OutboundPorts
 	s.wireguardRuntime = options.Runtime.WireGuard
 	s.torRuntime = options.Runtime.Tor
 
@@ -136,6 +146,21 @@ func StartWithOptions(db *sql.DB, addr string, httpsHandler *proxy.HTTPSHandler,
 	fm := firewall.GetManager()
 	if err := fm.Initialize(db); err != nil {
 		logger.LogError(fmt.Sprintf("Failed to initialize firewall: %v", err))
+	}
+
+	// Wire the firewall enabled callback to the iptables applier so the
+	// SSL_OUTBOUND chain tracks firewall mode + the current allowlist.
+	if s.outboundPorts != nil {
+		fm.SetOnEnabledChange(func(enabled bool, entries []firewall.OutboundPortEntry) {
+			if err := s.outboundPorts.ApplyOutboundPorts(enabled, entries); err != nil {
+				logger.LogError(fmt.Sprintf("Failed to apply outbound ports: %v", err))
+			}
+		})
+		// Apply the current state once at startup so a previously persisted
+		// "enabled" flag is honored without requiring a dashboard toggle.
+		if err := s.outboundPorts.ApplyOutboundPorts(fm.IsEnabled(), fm.GetOutboundPorts()); err != nil {
+			logger.LogError(fmt.Sprintf("Failed to apply initial outbound ports: %v", err))
+		}
 	}
 
 	server := &http.Server{
@@ -207,6 +232,7 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("/api/v1/firewall/status", s.withAuth(http.HandlerFunc(s.handleFirewallStatus)))
 	mux.Handle("/api/v1/firewall/rules", s.withAuth(http.HandlerFunc(s.handleFirewallRules)))
 	mux.Handle("/api/v1/firewall/rules/", s.withAuth(http.HandlerFunc(s.handleFirewallRuleByID)))
+	mux.Handle("/api/v1/firewall/outbound-ports", s.withAuth(http.HandlerFunc(s.handleOutboundPorts)))
 	mux.Handle("/api/v1/traffic", s.withAuth(http.HandlerFunc(s.handleTraffic)))
 	mux.Handle("/api/v1/traffic/", s.withAuth(http.HandlerFunc(s.handleTrafficDetail)))
 	mux.Handle("/api/v1/rewrites", s.withAuth(http.HandlerFunc(s.handleRewrites)))

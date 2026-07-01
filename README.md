@@ -7,6 +7,7 @@ A transparent interception proxy for HTTP and HTTPS traffic on Linux. It redirec
 ## Features
 
 - Transparent HTTP/HTTPS interception with iptables NAT
+- **Dual-NIC gateway mode** — pin LAN ingress and WAN MASQUERADE via `-lan` / `-wan`
 - TLS MITM with dynamically generated per-host certificates
 - **SNI-only mode** — passive observation without decryption
 - SQLite traffic logging with full request/response capture
@@ -15,6 +16,7 @@ A transparent interception proxy for HTTP and HTTPS traffic on Linux. It redirec
 - JSON-driven response rewrites
 - PCAP export of decrypted traffic for Wireshark
 - Drop / bypass lists by FQDN, IP, or CIDR; allowlist mode for source IPs
+- **Firewall mode** with host-based rules and an iptables-enforced **outbound port allowlist** (default: HTTPS + DNS)
 
 ![Preview](preview.gif)
 
@@ -69,6 +71,9 @@ For first-time setup with full dependency checks, use `sudo ./scripts/setup.sh`.
 | Inspection paused | Tunnel everything untouched while you're working on something else. | `Inspection` toggle in dashboard. |
 | **SNI-only** | Forward HTTPS unmodified; log only SNI and ClientHello metadata (TLS version, ciphers, ALPN, extensions). | `-snionly` flag or `SNI-only Mode` toggle. |
 | Allowlist (inspect-only) | Only inspect traffic from the listed source IPs. | `-inspectonly`. |
+| Dual-NIC gateway | Pin LAN ingress and WAN egress; transparent interception only fires for the LAN side. | `-lan <iface>` and/or `-wan <iface>`. |
+| Firewall mode (host rules) | Block/bypass/inspect individual hosts at the proxy layer. | Firewall → Rules in the dashboard. |
+| Firewall mode (outbound ports) | Restrict forwarded traffic to a default-DROP iptables allowlist (default HTTPS + DNS). | Firewall → Outbound Ports in the dashboard. |
 
 See [documentation/snionly.md](documentation/snionly.md) for a sample log row and the full list of metadata captured.
 

@@ -1338,6 +1338,216 @@ tr:hover td {
 }
 
 /* Firewall Tab */
+.subnav {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--panel-line);
+    padding-bottom: 0;
+}
+
+.subnav-item {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted-text, #9bb1c8);
+    padding: 8px 16px;
+    font: inherit;
+    cursor: pointer;
+    margin-bottom: -1px;
+}
+
+.subnav-item:hover {
+    color: var(--text);
+}
+
+.subnav-item.active {
+    color: var(--text);
+    border-bottom-color: var(--accent, #4ea1ff);
+}
+
+.firewall-pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.firewall-pane.hidden {
+    display: none !important;
+}
+
+.outbound-description {
+    margin: 0 0 12px 0;
+    max-width: 720px;
+    font-size: 0.9em;
+    line-height: 1.4;
+    flex: 0 0 auto;
+}
+
+.outbound-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding: 12px;
+    background: var(--bg-1, transparent);
+    border: 1px solid var(--panel-line);
+    border-radius: 8px;
+    flex: 0 0 auto;
+}
+
+.outbound-ports-table {
+    width: 100%;
+    max-width: 480px;
+    margin-bottom: 8px;
+}
+
+#firewall-outbound-pane .table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    max-height: none;
+}
+
+.outbound-ports-table th,
+.outbound-ports-table td {
+    text-align: left;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--table-row-line);
+}
+
+.outbound-ports-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.outbound-form {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.outbound-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.8em;
+    color: var(--muted-text, #9bb1c8);
+}
+
+.outbound-form input,
+.outbound-form select {
+    min-width: 100px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--panel-line);
+    background: var(--input-bg, transparent);
+    color: var(--text);
+}
+
+.outbound-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+}
+
+#firewall-rules-pane:not(.hidden) {
+    display: grid;
+    grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+    gap: 16px;
+}
+
+#firewall-outbound-pane:not(.hidden) {
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 16px;
+    overflow: auto;
+}
+
+#firewall-outbound-pane .outbound-description {
+    grid-column: 1 / -1;
+    max-width: none;
+    margin: 0;
+    padding: 10px 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+#firewall-outbound-pane .outbound-toolbar {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    flex-direction: column;
+    align-items: stretch;
+    margin: 0;
+    padding: 16px;
+    background: var(--bg-1);
+    border-color: var(--border);
+}
+
+#firewall-outbound-pane .outbound-form {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+#firewall-outbound-pane .outbound-form input,
+#firewall-outbound-pane .outbound-form select {
+    width: 100%;
+    min-width: 0;
+    padding: 8px 10px;
+    background: var(--bg-0);
+    border-color: var(--border);
+    color: var(--text-main);
+}
+
+#firewall-outbound-pane .outbound-form-actions {
+    justify-content: space-between;
+    margin-left: 0;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+#firewall-outbound-pane .table-wrap {
+    grid-column: 2;
+    grid-row: 2;
+    min-height: 320px;
+    padding: 12px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+#firewall-outbound-pane .outbound-ports-table {
+    max-width: none;
+    margin: 0;
+    border-collapse: collapse;
+}
+
+#firewall-outbound-pane .outbound-ports-table th {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#firewall-outbound-pane .outbound-ports-table td:last-child,
+#firewall-outbound-pane .outbound-ports-table th:last-child {
+    text-align: right;
+}
+
+#firewall-outbound-empty,
+#firewall-outbound-form-error {
+    grid-column: 2;
+    margin: 0;
+}
+
+
 .firewall-layout {
     display: grid;
     grid-template-columns: 340px 1fr;
@@ -1584,6 +1794,20 @@ tr:hover td {
 @media (max-width: 900px) {
     .firewall-layout {
         grid-template-columns: 1fr;
+    }
+
+    #firewall-rules-pane:not(.hidden),
+    #firewall-outbound-pane:not(.hidden) {
+        grid-template-columns: 1fr;
+    }
+
+    #firewall-outbound-pane .outbound-description,
+    #firewall-outbound-pane .outbound-toolbar,
+    #firewall-outbound-pane .table-wrap,
+    #firewall-outbound-empty,
+    #firewall-outbound-form-error {
+        grid-column: 1;
+        grid-row: auto;
     }
 
     .firewall-rules-panel {

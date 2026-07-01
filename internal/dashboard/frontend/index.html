@@ -438,7 +438,12 @@
                     </div>
                 </div>
 
-                <div class="firewall-layout">
+                <nav class="subnav" id="firewall-subnav">
+                    <button type="button" class="subnav-item active" data-subtab="firewall-rules" data-i18n="firewall.tabs.rules"></button>
+                    <button type="button" class="subnav-item" data-subtab="firewall-outbound" data-i18n="firewall.tabs.outbound"></button>
+                </nav>
+
+                <div id="firewall-rules-pane" class="firewall-pane">
                     <div class="firewall-rules-panel">
                         <div class="firewall-rules-header">
                             <span data-i18n="firewall.rules"></span>
@@ -509,6 +514,44 @@
                         </div>
                         <p id="firewall-form-error" class="form-error hidden"></p>
                     </form>
+                </div>
+
+                <div id="firewall-outbound-pane" class="firewall-pane hidden">
+                    <p class="muted outbound-description" data-i18n="firewall.outbound.description"></p>
+                    <div class="outbound-toolbar">
+                        <form id="firewall-outbound-form" class="outbound-form">
+                            <label>
+                                <span data-i18n="firewall.outbound.fields.port"></span>
+                                <input type="number" id="firewall-outbound-port" min="1" max="65535" required>
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.outbound.fields.protocol"></span>
+                                <select id="firewall-outbound-protocol">
+                                    <option value="tcp" data-i18n="firewall.outbound.protocols.tcp"></option>
+                                    <option value="udp" data-i18n="firewall.outbound.protocols.udp"></option>
+                                </select>
+                            </label>
+                            <button type="submit" class="btn btn-primary" id="firewall-outbound-add-btn" data-i18n="firewall.outbound.add"></button>
+                        </form>
+                        <div class="outbound-form-actions">
+                            <button type="button" class="btn btn-primary" id="firewall-outbound-save-btn" data-i18n="firewall.outbound.save" disabled></button>
+                            <span class="muted" id="firewall-outbound-save-status"></span>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="outbound-ports-table">
+                            <thead>
+                                <tr>
+                                    <th data-i18n="firewall.outbound.table.port"></th>
+                                    <th data-i18n="firewall.outbound.table.protocol"></th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="firewall-outbound-rows"></tbody>
+                        </table>
+                    </div>
+                    <p id="firewall-outbound-empty" class="muted hidden" data-i18n="firewall.outbound.empty"></p>
+                    <p id="firewall-outbound-form-error" class="form-error hidden"></p>
                 </div>
             </section>
 

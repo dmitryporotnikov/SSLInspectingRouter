@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
 )
@@ -14,8 +16,18 @@ import (
 const (
 	forwardEstablishedRuleComment = "SSLINSPECT_FWD_EST"
 	forwardAllowRuleComment       = "SSLINSPECT_FWD_ALL"
+	forwardOutboundRuleComment    = "SSLINSPECT_FWD_OUTBOUND"
+	outboundAcceptRuleComment     = "SSLINSPECT_OUTBOUND_ACCEPT"
+	outboundDropRuleComment       = "SSLINSPECT_OUTBOUND_DROP"
 	masqueradeRuleComment         = "SSLINSPECT_MASQ"
+	outboundChainName             = "SSL_OUTBOUND"
 )
+
+// OutboundPortEntry is a single (port, protocol) tuple allowed through SSL_OUTBOUND.
+type OutboundPortEntry struct {
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"` // "tcp" or "udp"
+}
 
 // FirewallManager handles the configuration of iptables rules to transparently intercept traffic.
 type FirewallManager struct {
@@ -27,9 +39,15 @@ type FirewallManager struct {
 	blockedIPs         []string
 	inspectOnlyIPs     []string
 	additionalTLSPorts []int
+	lanInterface       string
 	egressInterface    string
 	defaultEgressIF    string
 	rules              []string
+	// outboundsActive mirrors whether ApplyOutboundPorts(true, ...) is currently in effect.
+	// It is used by Cleanup and by re-apply calls to avoid duplicate work.
+	outboundsActive bool
+	outboundsMu     sync.Mutex
+	outboundEntries []OutboundPortEntry
 }
 
 func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
@@ -42,10 +60,26 @@ func NewFirewallManager(httpPort, httpsPort int) *FirewallManager {
 		blockedIPs:         make([]string, 0),
 		inspectOnlyIPs:     make([]string, 0),
 		additionalTLSPorts: make([]int, 0),
+		lanInterface:       "",
 		egressInterface:    "",
 		defaultEgressIF:    "",
 		rules:              make([]string, 0),
+		outboundsActive:    false,
+		outboundEntries:    make([]OutboundPortEntry, 0),
 	}
+}
+
+// SetLANInterface pins the LAN-side ingress interface. When set, the
+// PREROUTING → SSL_DISPATCH rules are constrained with `-i <lan>` so only
+// traffic ingressing on this interface is intercepted.
+func (fm *FirewallManager) SetLANInterface(iface string) {
+	fm.lanInterface = strings.TrimSpace(iface)
+}
+
+// LANInterface returns the configured LAN ingress interface, or empty string
+// when not pinned (single-NIC behavior).
+func (fm *FirewallManager) LANInterface() string {
+	return fm.lanInterface
 }
 
 // EnableInspectOnly restricts interception to the specified source IPs.
@@ -232,6 +266,7 @@ func (fm *FirewallManager) Setup() error {
 				"-s", ip,
 				"-j", "SSLPROXY",
 			}
+			rule = fm.appendIngressIface(rule)
 			if err := fm.runIPTables(rule...); err != nil {
 				return fmt.Errorf("failed to apply SSL_DISPATCH rule for source %s: %v", ip, err)
 			}
@@ -241,6 +276,7 @@ func (fm *FirewallManager) Setup() error {
 			"-t", "nat", "-A", "SSL_DISPATCH",
 			"-j", "SSLPROXY",
 		}
+		rule = fm.appendIngressIface(rule)
 		if err := fm.runIPTables(rule...); err != nil {
 			return fmt.Errorf("failed to apply SSL_DISPATCH global rule: %v", err)
 		}
@@ -254,6 +290,7 @@ func (fm *FirewallManager) Setup() error {
 		"-t", "nat", "-A", "PREROUTING",
 		"-j", "SSL_DISPATCH",
 	}
+	rule = fm.appendIngressIface(rule)
 	if err := fm.runIPTables(rule...); err != nil {
 		return fmt.Errorf("failed to link PREROUTING to SSL_DISPATCH: %v", err)
 	}
@@ -265,6 +302,8 @@ func (fm *FirewallManager) Setup() error {
 		"-p", "tcp", "-m", "owner", "!", "--uid-owner", "0",
 		"-j", "SSL_DISPATCH",
 	}
+	// The OUTPUT chain attaches to locally generated traffic, so the LAN
+	// ingress filter does not apply here.
 	if err := fm.runIPTables(rule...); err != nil {
 		logger.LogError(fmt.Sprintf("Failed to apply OUTPUT chain rule (non-critical): %v", err))
 	} else {
@@ -297,6 +336,9 @@ func (fm *FirewallManager) Setup() error {
 	if len(fm.blockedIPs) > 0 {
 		logger.LogInfo(fmt.Sprintf("Blocking %d IPs/CIDRs at network layer", len(fm.blockedIPs)))
 	}
+	if fm.lanInterface != "" {
+		logger.LogInfo(fmt.Sprintf("LAN ingress pinned to %s (PREROUTING constrained)", fm.lanInterface))
+	}
 	logger.LogInfo(fmt.Sprintf("Gateway pass-through enabled on interface %s (FORWARD + MASQUERADE)", fm.egressInterface))
 
 	return nil
@@ -306,8 +348,17 @@ func (fm *FirewallManager) Setup() error {
 func (fm *FirewallManager) Cleanup() error {
 	logger.LogInfo("Reverting iptables rules...")
 
+	// Remove the SSL_OUTBOUND chain first so the FORWARD jump is gone before
+	// we delete the unconditional ACCEPT it replaced.
+	fm.removeOutboundChain()
+
 	// Remove links from PREROUTING and OUTPUT
 	fm.deleteRuleCompletely([]string{"-t", "nat", "-A", "PREROUTING", "-j", "SSL_DISPATCH"})
+	if fm.lanInterface != "" {
+		fm.deleteRuleCompletely([]string{
+			"-t", "nat", "-A", "PREROUTING", "-i", fm.lanInterface, "-j", "SSL_DISPATCH",
+		})
+	}
 	fm.deleteRuleCompletely([]string{"-t", "nat", "-A", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSL_DISPATCH"})
 
 	// Flush and delete SSL_DISPATCH
@@ -370,6 +421,14 @@ func (fm *FirewallManager) cleanLegacyRules() {
 			break
 		}
 	}
+	// Legacy constrained PREROUTING links from previous dual-NIC runs.
+	if fm.lanInterface != "" {
+		for {
+			if err := fm.runIPTables("-t", "nat", "-D", "PREROUTING", "-i", fm.lanInterface, "-j", "SSL_DISPATCH"); err != nil {
+				break
+			}
+		}
+	}
 	// Also clean OUTPUT legacy
 	for {
 		if err := fm.runIPTables("-t", "nat", "-D", "OUTPUT", "-p", "tcp", "-m", "owner", "!", "--uid-owner", "0", "-j", "SSLPROXY"); err != nil {
@@ -392,6 +451,11 @@ func (fm *FirewallManager) cleanLegacyRules() {
 		"-t", "filter", "-A", "FORWARD",
 		"-m", "comment", "--comment", forwardAllowRuleComment,
 		"-j", "ACCEPT",
+	})
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardOutboundRuleComment,
+		"-j", outboundChainName,
 	})
 	if fm.egressInterface != "" {
 		fm.deleteRuleCompletely(masqueradeRuleForInterface(fm.egressInterface))
@@ -560,4 +624,206 @@ func masqueradeRuleForInterface(iface string) []string {
 		"-m", "comment", "--comment", masqueradeRuleComment,
 		"-j", "MASQUERADE",
 	}
+}
+
+// appendIngressIface appends `-i <lanInterface>` to an iptables argv slice
+// when a LAN ingress interface is configured. Returns the (possibly new)
+// slice. Callers that mutate the result should not retain references to
+// the original slice.
+func (fm *FirewallManager) appendIngressIface(rule []string) []string {
+	if fm.lanInterface == "" {
+		return rule
+	}
+	out := make([]string, 0, len(rule)+2)
+	out = append(out, rule...)
+	out = append(out, "-i", fm.lanInterface)
+	return out
+}
+
+// ApplyOutboundPorts toggles the SSL_OUTBOUND chain. When enabled is true
+// and entries is non-empty, the chain is (re)built with one ACCEPT per
+// (protocol, port) pair and a terminating DROP, and the FORWARD chain is
+// rewired to jump to it (replacing the unconditional FORWARD ACCEPT for
+// forwarded traffic — ESTABLISHED/RELATED remains accepted above).
+//
+// When enabled is false or entries is empty, the chain and the FORWARD
+// jump are removed and the original FORWARD ACCEPT is restored.
+//
+// Returns the first iptables error encountered; partial state is best
+// effort and is always cleaned up before returning.
+func (fm *FirewallManager) ApplyOutboundPorts(enabled bool, entries []OutboundPortEntry) error {
+	fm.outboundsMu.Lock()
+	defer fm.outboundsMu.Unlock()
+	// Always tear down any previous outbound state first so re-apply is
+	// idempotent and the new entries are installed into a clean chain.
+	if err := fm.removeOutboundChain(); err != nil {
+		return err
+	}
+
+	normalized := normalizeOutboundEntries(entries)
+	fm.outboundEntries = normalized
+
+	if !enabled || len(normalized) == 0 {
+		fm.outboundsActive = false
+		// Reinstall the unconditional FORWARD ACCEPT that we previously removed.
+		// Use -I (insert) so the rule lands right after the ESTABLISHED,RELATED
+		// rule, even if other rules were added between SSL_OUTBOUND toggles.
+		restoreRule := forwardAllowAllInsertRule()
+		fm.deleteRuleCompletely(forwardAllowAllRule())
+		if err := fm.runIPTables(restoreRule...); err != nil {
+			return fmt.Errorf("failed to restore FORWARD accept-all: %w", err)
+		}
+		fm.rules = append(fm.rules, strings.Join(restoreRule, " "))
+		logger.LogInfo("Outbound port allowlist removed; FORWARD restored to accept-all.")
+		return nil
+	}
+
+	// Remove the unconditional FORWARD ACCEPT; the SSL_OUTBOUND chain
+	// takes its place. ESTABLISHED,RELATED ACCEPT above it stays put.
+	forwardAllowRule := forwardAllowAllRule()
+	fm.deleteRuleCompletely(forwardAllowRule)
+
+	// Create the SSL_OUTBOUND chain (idempotent — flush if it already exists).
+	if err := fm.runIPTables("-t", "filter", "-N", outboundChainName); err != nil {
+		// Chain already exists from a previous run; flush it.
+		fm.runIPTables("-t", "filter", "-F", outboundChainName)
+	}
+
+	// Populate the chain: one ACCEPT per (protocol, port), then a final DROP.
+	for _, entry := range normalized {
+		rule := []string{
+			"-t", "filter", "-A", outboundChainName,
+			"-p", entry.Protocol, "--dport", strconv.Itoa(entry.Port),
+			"-m", "comment", "--comment", outboundAcceptRuleComment,
+			"-j", "ACCEPT",
+		}
+		if err := fm.runIPTables(rule...); err != nil {
+			fm.removeOutboundChain()
+			return fmt.Errorf("failed to add outbound ACCEPT for %s/%d: %w", entry.Protocol, entry.Port, err)
+		}
+		fm.rules = append(fm.rules, strings.Join(rule, " "))
+	}
+
+	dropRule := []string{
+		"-t", "filter", "-A", outboundChainName,
+		"-m", "comment", "--comment", outboundDropRuleComment,
+		"-j", "DROP",
+	}
+	if err := fm.runIPTables(dropRule...); err != nil {
+		fm.removeOutboundChain()
+		return fmt.Errorf("failed to add outbound DROP: %w", err)
+	}
+	fm.rules = append(fm.rules, strings.Join(dropRule, " "))
+
+	// Wire FORWARD → SSL_OUTBOUND. Insert at position 2 so the jump sits
+	// immediately after the ESTABLISHED,RELATED ACCEPT (position 1) and
+	// before any other rule. This guarantees the port allowlist is always
+	// consulted, even if a stale unconditional FORWARD ACCEPT exists.
+	jumpRule := []string{
+		"-t", "filter", "-I", "FORWARD", "2",
+		"-m", "comment", "--comment", forwardOutboundRuleComment,
+		"-j", outboundChainName,
+	}
+	if err := fm.runIPTables(jumpRule...); err != nil {
+		fm.removeOutboundChain()
+		return fmt.Errorf("failed to link FORWARD to %s: %w", outboundChainName, err)
+	}
+	fm.rules = append(fm.rules, strings.Join(jumpRule, " "))
+
+	fm.outboundsActive = true
+	logger.LogInfo(fmt.Sprintf("Outbound port allowlist active: %d entries (FORWARD → %s)", len(normalized), outboundChainName))
+	return nil
+}
+
+// OutboundPortsActive reports whether the SSL_OUTBOUND chain is currently installed.
+func (fm *FirewallManager) OutboundPortsActive() bool {
+	return fm.outboundsActive
+}
+
+// removeOutboundChain flushes and deletes the SSL_OUTBOUND chain and the
+// FORWARD jump that references it, leaving FORWARD in its prior state.
+// It is safe to call when no outbound chain is present.
+func (fm *FirewallManager) removeOutboundChain() error {
+	if !fm.outboundsActive && !chainExists(outboundChainName) {
+		return nil
+	}
+
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardOutboundRuleComment,
+		"-j", outboundChainName,
+	})
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", outboundChainName,
+		"-m", "comment", "--comment", outboundAcceptRuleComment,
+		"-j", "ACCEPT",
+	})
+	fm.deleteRuleCompletely([]string{
+		"-t", "filter", "-A", outboundChainName,
+		"-m", "comment", "--comment", outboundDropRuleComment,
+		"-j", "DROP",
+	})
+	fm.runIPTables("-t", "filter", "-F", outboundChainName)
+	fm.runIPTables("-t", "filter", "-X", outboundChainName)
+	fm.outboundsActive = false
+	return nil
+}
+
+func forwardAllowAllRule() []string {
+	return []string{
+		"-t", "filter", "-A", "FORWARD",
+		"-m", "comment", "--comment", forwardAllowRuleComment,
+		"-j", "ACCEPT",
+	}
+}
+
+// forwardAllowAllInsertRule is the form used to (re)install the
+// unconditional FORWARD ACCEPT at position 2 (right after the
+// ESTABLISHED,RELATED rule). The delete form uses the -A shape; only
+// the install form needs the explicit -I 2 to guarantee position.
+func forwardAllowAllInsertRule() []string {
+	return []string{
+		"-t", "filter", "-I", "FORWARD", "2",
+		"-m", "comment", "--comment", forwardAllowRuleComment,
+		"-j", "ACCEPT",
+	}
+}
+
+// normalizeOutboundEntries validates, de-duplicates, and sorts entries
+// so the iptables chain has stable, predictable order.
+func normalizeOutboundEntries(entries []OutboundPortEntry) []OutboundPortEntry {
+	seen := make(map[string]struct{}, len(entries))
+	out := make([]OutboundPortEntry, 0, len(entries))
+	for _, e := range entries {
+		proto := strings.ToLower(strings.TrimSpace(e.Protocol))
+		if proto != "tcp" && proto != "udp" {
+			continue
+		}
+		if e.Port < 1 || e.Port > 65535 {
+			continue
+		}
+		key := proto + "/" + strconv.Itoa(e.Port)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, OutboundPortEntry{Port: e.Port, Protocol: proto})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Protocol != out[j].Protocol {
+			return out[i].Protocol < out[j].Protocol
+		}
+		return out[i].Port < out[j].Port
+	})
+	return out
+}
+
+// chainExists checks whether an iptables chain exists in the filter table.
+// Best effort: a non-zero exit from iptables is treated as "does not exist".
+func chainExists(name string) bool {
+	cmd := exec.Command("iptables", "-t", "filter", "-nL", name)
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return true
 }

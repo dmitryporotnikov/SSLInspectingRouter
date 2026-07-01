@@ -176,6 +176,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if port := targetPortFromURL(fullURL); port > 0 && !fm.IsOutboundPortAllowed("tcp", port) {
+		logger.LogInfo(fmt.Sprintf("Blocked HTTP host %s from %s (outbound port %d not allowed)", targetHost, sourceIP, port))
+		writePlainError(w, http.StatusForbidden, "Blocked")
+		return
+	}
+
 	if blockList != nil && blockList.Matches(targetHost) {
 		reqID := logger.LogHTTPRequest(logger.RequestLogEntry{
 			SourceIP: sourceIP,
@@ -461,6 +467,28 @@ func normalizeURLHost(raw string) (string, string, error) {
 	}
 
 	return hostForURL, hostOnly, nil
+}
+
+func targetPortFromURL(raw string) int {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return 0
+	}
+	if port := parsed.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err == nil && n >= 1 && n <= 65535 {
+			return n
+		}
+		return 0
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http":
+		return 80
+	case "https":
+		return 443
+	default:
+		return 0
+	}
 }
 
 func containsControlChars(value string) bool {
