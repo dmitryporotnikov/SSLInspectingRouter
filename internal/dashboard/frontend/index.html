@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body class="login-mode" data-i18n-state="loading">
+    <div class="background-layer" aria-hidden="true"></div>
+
+    <section id="login-view" class="auth-view">
+        <div class="auth-panel panel">
+            <div class="auth-panel-header">
+                <div>
+                    <p class="eyebrow" data-i18n="login.eyebrow"></p>
+                    <h1>SSL Inspecting Router</h1>
+                </div>
+                <label class="language-picker inline-language-picker">
+                    <span data-i18n="language.label"></span>
+                    <select id="login-language-select" data-language-select></select>
+                </label>
+            </div>
+            <p class="muted" data-i18n="login.subtitle"></p>
+            <form id="login-form" class="auth-form">
+                <label>
+                    <span data-i18n="login.username"></span>
+                    <input type="text" id="login-username" autocomplete="username" required>
+                </label>
+                <label>
+                    <span data-i18n="login.password"></span>
+                    <input type="password" id="login-password" autocomplete="current-password" required>
+                </label>
+                <button type="submit" class="btn btn-primary" data-i18n="login.submit"></button>
+                <p id="login-error" class="form-error hidden"></p>
+            </form>
+            <p class="auth-footnote" data-i18n-html="login.defaultCredentialsHtml"></p>
+        </div>
+    </section>
+
+    <div id="app-view" class="app-view hidden">
+        <aside class="sidebar panel">
+            <div>
+                <p class="eyebrow">SSLInspectingRouter</p>
+                <h2 data-i18n="sidebar.title"></h2>
+            </div>
+
+            <nav class="nav-list">
+                <button type="button" data-section="traffic" class="nav-item active" data-i18n="nav.traffic"></button>
+                <button type="button" data-section="rewrites" class="nav-item" data-i18n="nav.rewrites"></button>
+                <button type="button" data-section="firewall" class="nav-item" id="firewall-nav" data-i18n="nav.firewall"></button>
+                <button type="button" data-section="users" class="nav-item" id="users-nav" data-i18n="nav.users"></button>
+            </nav>
+
+            <div class="sidebar-meta">
+                <div class="meta-row">
+                    <span data-i18n="sidebar.rulesLoaded"></span>
+                    <strong id="rewrite-count">0</strong>
+                </div>
+                <div class="meta-row" id="body-artifacts-meta">
+                    <span data-i18n="sidebar.bodyArtifacts"></span>
+                    <strong id="body-artifacts-dir" class="meta-value">-</strong>
+                </div>
+                <div class="meta-row">
+                    <span data-i18n="sidebar.dropEntries"></span>
+                    <strong id="drop-list-count">0</strong>
+                </div>
+                <div class="meta-row">
+                    <span data-i18n="sidebar.bypassEntries"></span>
+                    <strong id="bypass-list-count">0</strong>
+                </div>
+                <button type="button" class="btn btn-ghost" id="view-rules-btn" data-i18n="sidebar.openRewriteStudio"></button>
+            </div>
+
+            <section id="settings-panel" class="settings-panel hidden">
+                <div class="settings-header">
+                    <h3 data-i18n="settings.title"></h3>
+                    <p data-i18n="settings.subtitle"></p>
+                </div>
+
+                <div class="settings-group compact-group">
+                    <h4 data-i18n="settings.runtime"></h4>
+                    <div class="control-list">
+                        <div class="switch-wrap compact-switch" id="inspection-control-wrap">
+                            <span data-i18n="settings.inspection"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="inspection-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="truncate-log-wrap">
+                            <span data-i18n="settings.truncateLogBodies"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="truncate-log-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="log-nothing-wrap">
+                            <span data-i18n="settings.logNothing"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="log-nothing-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="sni-only-wrap">
+                            <span data-i18n="settings.sniOnlyMode"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="sni-only-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="wireguard-wrap">
+                            <span data-i18n="settings.wireguardEgress"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="wireguard-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="tor-wrap">
+                            <span data-i18n="settings.torEgress"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="tor-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
+                            <span data-i18n="settings.bodyArtifacts"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="body-artifacts-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="settings-fold" open>
+                    <summary data-i18n="settings.artifactStoragePath"></summary>
+                    <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
+                        <input type="text" id="body-artifacts-directory-input" data-i18n-placeholder="settings.artifactDirectoryPlaceholder">
+                        <button type="button" class="btn btn-ghost" id="body-artifacts-save" data-i18n="settings.setPath"></button>
+                    </div>
+                </details>
+
+                <details class="settings-fold" open>
+                    <summary data-i18n="settings.wireguardClientConfig"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.wireguardNoteHtml"></p>
+                    <textarea id="wireguard-config-input" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;AllowedIPs = 0.0.0.0/0"></textarea>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-ghost" id="wireguard-config-save" data-i18n="settings.saveWireGuardConfig"></button>
+                        <span class="muted" id="wireguard-config-status"></span>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.tunnel"></span>
+                        <strong id="wireguard-meta-value" class="meta-value">-</strong>
+                    </div>
+                </details>
+
+                <details class="settings-fold" open>
+                    <summary data-i18n="settings.torSection"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.torNoteHtml"></p>
+                    <div class="meta-row">
+                        <span data-i18n="settings.torRoute"></span>
+                        <strong id="tor-meta-value" class="meta-value">-</strong>
+                    </div>
+                    <span class="muted" id="tor-status"></span>
+                </details>
+
+                <details id="policy-controls" class="settings-fold policy-panel">
+                    <summary data-i18n="settings.trafficPolicy"></summary>
+                    <p class="muted policy-hint" data-i18n="settings.trafficPolicyHint"></p>
+                    <div class="policy-grid">
+                        <label>
+                            <span data-i18n="settings.dropList"></span>
+                            <textarea id="drop-list-input" placeholder="example.com&#10;203.0.113.10&#10;10.10.0.0/16"></textarea>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.bypassList"></span>
+                            <textarea id="bypass-list-input" placeholder="internal.example.com&#10;198.51.100.42"></textarea>
+                        </label>
+                    </div>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-primary" id="policy-save-btn" data-i18n="settings.savePolicy"></button>
+                        <span class="muted" id="policy-save-status"></span>
+                    </div>
+                </details>
+
+                <details class="settings-fold">
+                    <summary data-i18n="settings.startupProfile"></summary>
+                    <p class="muted settings-note" data-i18n="settings.startupProfileNote"></p>
+                    <div class="meta-row">
+                        <span data-i18n="settings.allowQuic"></span>
+                        <strong id="allow-quic-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.tlsPorts"></span>
+                        <strong id="tls-ports-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.inspectOnly"></span>
+                        <strong id="inspect-only-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.pcapPath"></span>
+                        <strong id="pcap-path-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.currentEgress"></span>
+                        <strong id="egress-interface-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.defaultEgress"></span>
+                        <strong id="default-egress-interface-value" class="meta-value">-</strong>
+                    </div>
+                </details>
+            </section>
+        </aside>
+
+        <main class="main-area">
+            <header class="topbar panel">
+                <div class="status-grid">
+                    <article>
+                        <p class="metric-label" data-i18n="metrics.connectionLabel"></p>
+                        <p class="metric-value" id="metric-connection">-</p>
+                    </article>
+                    <article>
+                        <p class="metric-label" data-i18n="metrics.databaseSizeLabel"></p>
+                        <p class="metric-value" id="metric-db-size">-</p>
+                    </article>
+                    <article>
+                        <p class="metric-label" data-i18n="metrics.capturedRequestsLabel"></p>
+                        <p class="metric-value" id="metric-requests">-</p>
+                    </article>
+                </div>
+
+                <div class="topbar-actions">
+                    <label class="language-picker inline-language-picker topbar-language-picker">
+                        <span data-i18n="language.label"></span>
+                        <select id="app-language-select" data-language-select></select>
+                    </label>
+                    <div class="user-block">
+                        <span id="current-user">-</span>
+                        <small id="current-role">-</small>
+                    </div>
+                    <button type="button" class="btn btn-ghost theme-toggle" id="theme-toggle">
+                        <span id="theme-toggle-icon" aria-hidden="true">☾</span>
+                    </button>
+                    <button type="button" class="btn btn-ghost" id="logout-btn" data-i18n="actions.logout"></button>
+                </div>
+            </header>
+
+            <section id="traffic-section" class="panel section-view">
+                <div class="section-header">
+                    <h3 data-i18n="traffic.title"></h3>
+                    <div class="section-actions">
+                        <input type="text" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder">
+                        <select id="traffic-mode-filter">
+                            <option value="" data-i18n="traffic.modes.all"></option>
+                            <option value="inspected" data-i18n="traffic.modes.inspected"></option>
+                            <option value="paused" data-i18n="traffic.modes.paused"></option>
+                            <option value="sni" data-i18n="traffic.modes.sni"></option>
+                            <option value="bypassed" data-i18n="traffic.modes.bypassed"></option>
+                            <option value="blocked" data-i18n="traffic.modes.blocked"></option>
+                        </select>
+                        <select id="traffic-limit">
+                            <option value="25">25</option>
+                            <option value="50" selected>50</option>
+                            <option value="100">100</option>
+                            <option value="200">200</option>
+                        </select>
+                        <button type="button" class="btn btn-ghost" id="refresh-btn" data-i18n="actions.refresh"></button>
+                        <button type="button" class="btn btn-ghost" id="flush-traffic-btn" data-i18n="traffic.flush"></button>
+                    </div>
+                </div>
+
+                <div class="table-wrap">
+                    <table class="traffic-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="traffic.table.time"></th>
+                                <th data-i18n="traffic.table.mode"></th>
+                                <th data-i18n="traffic.table.method"></th>
+                                <th data-i18n="traffic.table.host"></th>
+                                <th data-i18n="traffic.table.url"></th>
+                                <th data-i18n="traffic.table.source"></th>
+                                <th data-i18n="traffic.table.status"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="traffic-table-body"></tbody>
+                    </table>
+                </div>
+
+                <div class="pager-row">
+                    <div id="traffic-summary" class="muted"></div>
+                    <div class="pager-controls">
+                        <button type="button" class="btn btn-ghost" id="prev-page" data-i18n="pagination.previous"></button>
+                        <button type="button" class="btn btn-ghost" id="next-page" data-i18n="pagination.next"></button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="rewrites-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3 data-i18n="rewrites.title"></h3>
+                    <div class="section-actions">
+                        <button type="button" class="btn btn-ghost" id="rewrite-new-btn" data-i18n="rewrites.newRule"></button>
+                        <button type="button" class="btn btn-ghost" id="rewrite-reload-btn" data-i18n="rewrites.reload"></button>
+                    </div>
+                </div>
+
+                <div class="rewrites-layout">
+                    <div class="rewrite-list-wrap">
+                        <div class="rewrite-list-header">
+                            <span data-i18n="rewrites.loadedRules"></span>
+                            <small id="rewrite-managed-file" class="muted"></small>
+                        </div>
+                        <div id="rewrite-list" class="rewrite-list"></div>
+                    </div>
+
+                    <form id="rewrite-form" class="rewrite-form">
+                        <div class="rewrite-form-head">
+                            <div>
+                                <h4 id="rewrite-form-title"></h4>
+                                <p id="rewrite-form-origin" class="muted"></p>
+                            </div>
+                            <label class="checkbox-row rewrite-enabled-row">
+                                <input type="checkbox" id="rewrite-enabled" checked>
+                                <span data-i18n="rewrites.fields.enabled"></span>
+                            </label>
+                        </div>
+
+                        <div class="rewrite-grid">
+                            <label>
+                                <span data-i18n="rewrites.fields.ruleName"></span>
+                                <input type="text" id="rewrite-name" placeholder="inject-debug-header" required>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.matchHost"></span>
+                                <input type="text" id="rewrite-host" placeholder="example.com">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.matchHostRegex"></span>
+                                <input type="text" id="rewrite-host-regex" placeholder="(^|\\.)example\\.com$">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.pathPrefix"></span>
+                                <input type="text" id="rewrite-path-prefix" placeholder="/api/v1/">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.pathRegex"></span>
+                                <input type="text" id="rewrite-path-regex" placeholder="^/v[0-9]+/">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.method"></span>
+                                <input type="text" id="rewrite-method" placeholder="GET">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.methods"></span>
+                                <input type="text" id="rewrite-methods" placeholder="GET,POST">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.status"></span>
+                                <input type="text" id="rewrite-status" placeholder="200">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.statuses"></span>
+                                <input type="text" id="rewrite-statuses" placeholder="200,204,206">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.contentTypeContains"></span>
+                                <input type="text" id="rewrite-content-type-contains" placeholder="text/html">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.contentTypeRegex"></span>
+                                <input type="text" id="rewrite-content-type-regex" placeholder="text/(html|plain)">
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.deleteHeaders"></span>
+                                <input type="text" id="rewrite-del-headers" placeholder="Server, X-Powered-By">
+                            </label>
+                        </div>
+
+                        <div class="rewrite-grid rewrite-text-grid">
+                            <label>
+                                <span data-i18n="rewrites.fields.requestHeaderContains"></span>
+                                <textarea id="rewrite-req-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.responseHeaderContains"></span>
+                                <textarea id="rewrite-resp-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.setHeaders"></span>
+                                <textarea id="rewrite-set-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.addHeaders"></span>
+                                <textarea id="rewrite-add-headers" data-i18n-placeholder="rewrites.placeholders.headerValue"></textarea>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.bodyReplace"></span>
+                                <textarea id="rewrite-body-replace" data-i18n-placeholder="rewrites.placeholders.replaceBody"></textarea>
+                            </label>
+                            <label>
+                                <span data-i18n="rewrites.fields.bodyRegexReplace"></span>
+                                <textarea id="rewrite-body-regex" data-i18n-placeholder="rewrites.placeholders.replaceBodyRegex"></textarea>
+                            </label>
+                        </div>
+
+                        <div class="rewrite-actions">
+                            <button type="submit" class="btn btn-primary" id="rewrite-save-btn" data-i18n="rewrites.saveRule"></button>
+                            <button type="button" class="btn btn-ghost" id="rewrite-delete-btn" data-i18n="rewrites.deleteRule"></button>
+                            <button type="button" class="btn btn-ghost hidden" id="rewrite-clone-btn" data-i18n="rewrites.cloneToManaged"></button>
+                            <span class="muted" id="rewrite-save-status"></span>
+                        </div>
+
+                        <p id="rewrite-form-error" class="form-error hidden"></p>
+                    </form>
+                </div>
+            </section>
+
+            <section id="firewall-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3 data-i18n="firewall.title"></h3>
+                    <div class="section-actions">
+                        <div class="switch-wrap inline-switch" id="firewall-mode-wrap">
+                            <span data-i18n="firewall.modeLabel"></span>
+                            <label class="switch">
+                                <input type="checkbox" id="firewall-mode-toggle">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="firewall-add-rule-btn" data-i18n="firewall.addRule"></button>
+                    </div>
+                </div>
+
+                <nav class="subnav" id="firewall-subnav">
+                    <button type="button" class="subnav-item active" data-subtab="firewall-rules" data-i18n="firewall.tabs.rules"></button>
+                    <button type="button" class="subnav-item" data-subtab="firewall-outbound" data-i18n="firewall.tabs.outbound"></button>
+                </nav>
+
+                <div id="firewall-rules-pane" class="firewall-pane">
+                    <div class="firewall-rules-panel">
+                        <div class="firewall-rules-header">
+                            <span data-i18n="firewall.rules"></span>
+                            <span id="firewall-rules-count" class="muted">0</span>
+                        </div>
+                        <p class="firewall-default-note" data-i18n="firewall.defaultNote"></p>
+                        <div id="firewall-rules-list" class="firewall-rules-list"></div>
+                    </div>
+
+                    <form id="firewall-rule-form" class="firewall-rule-form">
+                        <div class="firewall-form-head">
+                            <div>
+                                <h4 id="firewall-rule-form-title"></h4>
+                            </div>
+                            <label class="checkbox-row firewall-enabled-row">
+                                <input type="checkbox" id="firewall-rule-enabled" checked>
+                                <span data-i18n="firewall.fields.enabled"></span>
+                            </label>
+                        </div>
+
+                        <div class="firewall-form-grid">
+                            <label>
+                                <span data-i18n="firewall.fields.action"></span>
+                                <select id="firewall-rule-action" required>
+                                    <option value="block" data-i18n="firewall.actions.block"></option>
+                                    <option value="bypass" data-i18n="firewall.actions.bypass"></option>
+                                    <option value="inspect" data-i18n="firewall.actions.inspect"></option>
+                                </select>
+                            </label>
+                            <label id="firewall-block-mode-wrap" class="hidden">
+                                <span data-i18n="firewall.fields.blockMode"></span>
+                                <select id="firewall-rule-block-mode">
+                                    <option value="display_page" data-i18n="firewall.blockModes.displayPage"></option>
+                                    <option value="silent_drop" data-i18n="firewall.blockModes.silentDrop"></option>
+                                </select>
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.priority"></span>
+                                <input type="number" id="firewall-rule-priority" value="0" min="0" max="1000">
+                            </label>
+                        </div>
+
+                        <h5 data-i18n="firewall.fields.matchConditions"></h5>
+                        <div class="firewall-form-grid">
+                            <label>
+                                <span data-i18n="firewall.fields.host"></span>
+                                <input type="text" id="firewall-rule-host" placeholder="example.com">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.hostRegex"></span>
+                                <input type="text" id="firewall-rule-host-regex" placeholder="(^|\.)example\.com$">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.ip"></span>
+                                <input type="text" id="firewall-rule-ip" placeholder="192.168.1.1">
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.fields.cidr"></span>
+                                <input type="text" id="firewall-rule-cidr" placeholder="10.0.0.0/8">
+                            </label>
+                        </div>
+
+                        <div class="firewall-form-actions">
+                            <button type="submit" class="btn btn-primary" id="firewall-save-btn" data-i18n="firewall.saveRule"></button>
+                            <button type="button" class="btn btn-ghost" id="firewall-delete-btn" data-i18n="firewall.deleteRule"></button>
+                            <button type="button" class="btn btn-ghost" id="firewall-cancel-btn" data-i18n="firewall.cancelEdit"></button>
+                            <span class="muted" id="firewall-save-status"></span>
+                        </div>
+                        <p id="firewall-form-error" class="form-error hidden"></p>
+                    </form>
+                </div>
+
+                <div id="firewall-outbound-pane" class="firewall-pane hidden">
+                    <p class="muted outbound-description" data-i18n="firewall.outbound.description"></p>
+                    <div class="outbound-toolbar">
+                        <form id="firewall-outbound-form" class="outbound-form">
+                            <label>
+                                <span data-i18n="firewall.outbound.fields.port"></span>
+                                <input type="number" id="firewall-outbound-port" min="1" max="65535" required>
+                            </label>
+                            <label>
+                                <span data-i18n="firewall.outbound.fields.protocol"></span>
+                                <select id="firewall-outbound-protocol">
+                                    <option value="tcp" data-i18n="firewall.outbound.protocols.tcp"></option>
+                                    <option value="udp" data-i18n="firewall.outbound.protocols.udp"></option>
+                                </select>
+                            </label>
+                            <button type="submit" class="btn btn-primary" id="firewall-outbound-add-btn" data-i18n="firewall.outbound.add"></button>
+                        </form>
+                        <div class="outbound-form-actions">
+                            <button type="button" class="btn btn-primary" id="firewall-outbound-save-btn" data-i18n="firewall.outbound.save" disabled></button>
+                            <span class="muted" id="firewall-outbound-save-status"></span>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="outbound-ports-table">
+                            <thead>
+                                <tr>
+                                    <th data-i18n="firewall.outbound.table.port"></th>
+                                    <th data-i18n="firewall.outbound.table.protocol"></th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="firewall-outbound-rows"></tbody>
+                        </table>
+                    </div>
+                    <p id="firewall-outbound-empty" class="muted hidden" data-i18n="firewall.outbound.empty"></p>
+                    <p id="firewall-outbound-form-error" class="form-error hidden"></p>
+                </div>
+            </section>
+
+            <section id="users-section" class="panel section-view hidden">
+                <div class="section-header">
+                    <h3 data-i18n="users.title"></h3>
+                    <button type="button" class="btn btn-ghost" id="reload-users-btn" data-i18n="rewrites.reload"></button>
+                </div>
+
+                <div class="table-wrap users-table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="users.table.username"></th>
+                                <th data-i18n="users.table.displayName"></th>
+                                <th data-i18n="users.table.role"></th>
+                                <th data-i18n="users.table.state"></th>
+                                <th data-i18n="users.table.lastLogin"></th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body"></tbody>
+                    </table>
+                </div>
+
+                <form id="user-form" class="user-form">
+                    <h4 id="user-form-title"></h4>
+                    <input type="hidden" id="user-id">
+                    <div class="user-grid">
+                        <label>
+                            <span data-i18n="users.form.username"></span>
+                            <input id="user-username" type="text" placeholder="analyst-1" required>
+                        </label>
+                        <label>
+                            <span data-i18n="users.form.displayName"></span>
+                            <input id="user-display-name" type="text" data-i18n-placeholder="users.form.displayNamePlaceholder" required>
+                        </label>
+                        <label>
+                            <span data-i18n="users.form.role"></span>
+                            <select id="user-role">
+                                <option value="viewer" data-i18n="roles.viewer"></option>
+                                <option value="operator" data-i18n="roles.operator"></option>
+                                <option value="admin" data-i18n="roles.admin"></option>
+                            </select>
+                        </label>
+                        <label>
+                            <span data-i18n="users.form.password"></span>
+                            <input id="user-password" type="password" data-i18n-placeholder="users.form.passwordPlaceholder" required>
+                        </label>
+                        <label class="checkbox-row">
+                            <input id="user-active" type="checkbox" checked>
+                            <span data-i18n="users.form.active"></span>
+                        </label>
+                    </div>
+                    <div class="user-form-actions">
+                        <button type="submit" class="btn btn-primary" id="user-submit"></button>
+                        <button type="button" class="btn btn-ghost hidden" id="cancel-edit" data-i18n="users.form.cancelEdit"></button>
+                    </div>
+                    <p id="user-form-error" class="form-error hidden"></p>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <div id="modal" class="modal hidden">
+        <div class="modal-card panel">
+            <div class="modal-header">
+                <h4 id="modal-title"></h4>
+                <button type="button" class="btn btn-ghost" id="modal-close" data-i18n="actions.close"></button>
+            </div>
+            <div id="modal-content" class="modal-content"></div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+
+</html>

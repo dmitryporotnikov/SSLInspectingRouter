@@ -1,0 +1,7 @@
+Value,Description,Reference
+0,NULL,[RFC5246]
+1,DEFLATE,[RFC3749]
+2-63,Unassigned,
+64,LZS,[RFC3943]
+65-223,Unassigned,
+224-255,Reserved for Private Use,[RFC3749]

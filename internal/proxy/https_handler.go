@@ -1,0 +1,990 @@
+package proxy
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/blocklist"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/firewall"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/logger"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/rewrites"
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/tlsnames"
+)
+
+// HTTPSHandler manages transparent HTTPS proxying.
+// It intercepts TLS connections, performs MITM to inspect traffic, and forwards requests.
+type HTTPSHandler struct {
+	certManager       *cert.CertManager
+	client            *http.Client
+	ipClient          *http.Client
+	torClient         *http.Client
+	torIPClient       *http.Client
+	torDialer         socksDialer
+	blockList         *blocklist.BlockList
+	bypassList        *blocklist.BlockList
+	rewriter          *rewrites.Engine
+	inspectionEnabled atomic.Bool
+	sniOnlyMode       atomic.Bool
+	policyMu          sync.RWMutex
+	upstreamMu        sync.RWMutex
+}
+
+var errNoSNI = errors.New("no SNI found in ClientHello")
+
+type tunnelLogMode int
+
+const (
+	tunnelLogBypassed tunnelLogMode = iota
+	tunnelLogInspectionPaused
+	tunnelLogSNIOnly
+)
+
+// NewHTTPSHandler creates a new HTTPS handler with a custom client that ignores upstream certificates (for testing).
+func NewHTTPSHandler(certManager *cert.CertManager, blockList *blocklist.BlockList, bypassList *blocklist.BlockList, rewriter *rewrites.Engine) *HTTPSHandler {
+	baseTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // Verify upstream certificates by default.
+		},
+	}
+	ipTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			// IP-based transparent targets commonly present hostname certs.
+			// Skip upstream cert verification for IP endpoints to avoid false 502 errors.
+			InsecureSkipVerify: true,
+		},
+	}
+
+	h := &HTTPSHandler{
+		certManager: certManager,
+		client: &http.Client{
+			// Prevent automatic redirect following to maintain transparent proxy behavior
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+			Transport: baseTransport,
+		},
+		ipClient: &http.Client{
+			// Keep redirect behavior consistent with the main client.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+			Transport: ipTransport,
+		},
+		blockList:  blockList,
+		bypassList: bypassList,
+		rewriter:   rewriter,
+	}
+	h.inspectionEnabled.Store(true)
+	return h
+}
+
+// SetInspection enables or disables SSL inspection.
+func (h *HTTPSHandler) SetInspection(enabled bool) {
+	h.inspectionEnabled.Store(enabled)
+}
+
+// IsInspectionEnabled returns the current state of SSL inspection.
+func (h *HTTPSHandler) IsInspectionEnabled() bool {
+	return h.inspectionEnabled.Load()
+}
+
+// SetSNIOnlyMode toggles SNI-only mode. When enabled, HTTPS connections
+// are forwarded transparently to the original destination (no MITM, original
+// certificate chain is preserved) and only SNI plus ClientHello metadata are
+// captured in the logs.
+func (h *HTTPSHandler) SetSNIOnlyMode(enabled bool) {
+	h.sniOnlyMode.Store(enabled)
+}
+
+// IsSNIOnlyMode reports whether SNI-only mode is currently active.
+func (h *HTTPSHandler) IsSNIOnlyMode() bool {
+	return h.sniOnlyMode.Load()
+}
+
+func (h *HTTPSHandler) SetBlockList(blockList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.blockList = blockList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPSHandler) SetBypassList(bypassList *blocklist.BlockList) {
+	h.policyMu.Lock()
+	h.bypassList = bypassList
+	h.policyMu.Unlock()
+}
+
+func (h *HTTPSHandler) BlockListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.blockList == nil {
+		return []string{}
+	}
+	return h.blockList.Entries()
+}
+
+func (h *HTTPSHandler) BypassListEntries() []string {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	if h.bypassList == nil {
+		return []string{}
+	}
+	return h.bypassList.Entries()
+}
+
+func (h *HTTPSHandler) currentBlockList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.blockList
+}
+
+func (h *HTTPSHandler) currentBypassList() *blocklist.BlockList {
+	h.policyMu.RLock()
+	defer h.policyMu.RUnlock()
+	return h.bypassList
+}
+
+// SetSOCKSProxy enables or disables upstream routing via SOCKS5.
+func (h *HTTPSHandler) SetSOCKSProxy(enabled bool, socksAddr string) error {
+	h.upstreamMu.Lock()
+	defer h.upstreamMu.Unlock()
+
+	if !enabled {
+		h.torClient = nil
+		h.torIPClient = nil
+		h.torDialer = nil
+		return nil
+	}
+
+	transport, _, err := buildSOCKS5RoundTripper(h.client.Transport, socksAddr)
+	if err != nil {
+		return err
+	}
+	ipTransport, _, err := buildSOCKS5RoundTripper(h.ipClient.Transport, socksAddr)
+	if err != nil {
+		return err
+	}
+	dialer, _, err := buildSOCKS5Dialer(socksAddr, 10*time.Second)
+	if err != nil {
+		return err
+	}
+
+	clientCopy := *h.client
+	clientCopy.Transport = transport
+
+	ipClientCopy := *h.ipClient
+	ipClientCopy.Transport = ipTransport
+
+	h.torClient = &clientCopy
+	h.torIPClient = &ipClientCopy
+	h.torDialer = dialer
+	return nil
+}
+
+func (h *HTTPSHandler) upstreamClientForHost(hostname string) *http.Client {
+	h.upstreamMu.RLock()
+	defer h.upstreamMu.RUnlock()
+
+	if net.ParseIP(hostname) != nil {
+		if h.torIPClient != nil {
+			return h.torIPClient
+		}
+		return h.ipClient
+	}
+
+	if h.torClient != nil {
+		return h.torClient
+	}
+	return h.client
+}
+
+func (h *HTTPSHandler) dialTunnelTarget(target string, timeout time.Duration) (net.Conn, error) {
+	h.upstreamMu.RLock()
+	dialer := h.torDialer
+	h.upstreamMu.RUnlock()
+
+	if dialer != nil {
+		return dialer.Dial("tcp", target)
+	}
+	return net.DialTimeout("tcp", target, timeout)
+}
+
+// HandleConnection intercepts a raw TCP connection, performs SNI sniffing,
+// and upgrades it to a MITM TLS connection for inspection.
+func (h *HTTPSHandler) HandleConnection(conn net.Conn) {
+	defer conn.Close()
+
+	sourceIP := sourceIPFromAddr(conn.RemoteAddr())
+	logger.LogDebug(fmt.Sprintf("HTTPS connection from %s", sourceIP))
+
+	upstreamAddr, upstreamPort, err := getOriginalDestination(conn)
+	if err != nil {
+		upstreamAddr = ""
+		upstreamPort = 443
+		logger.LogDebug(fmt.Sprintf("Original destination lookup unavailable, defaulting to :443: %v", err))
+	}
+
+	hostname, peekedBytes, err := h.extractSNI(conn)
+	if err != nil {
+		if errors.Is(err, errNoSNI) && upstreamAddr != "" {
+			hostname = upstreamAddr
+			logger.LogDebug(fmt.Sprintf("SNI missing; using original destination IP %s", hostname))
+		} else {
+			logger.LogError(fmt.Sprintf("SNI extraction failed: %v", err))
+			return
+		}
+	}
+	if hostname == "" {
+		logger.LogError("SNI extraction failed: TLS target host is empty")
+		return
+	}
+
+	logger.LogDebug(fmt.Sprintf("TLS target host: %s", hostname))
+
+	fm := firewall.GetManager()
+	if !fm.IsOutboundPortAllowed("tcp", upstreamPort) {
+		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (outbound port %d not allowed)", hostname, sourceIP, upstreamPort))
+		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+		conn.Close()
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "BLOCKED",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Blocked by outbound port policy"),
+			Truncated:   false,
+		})
+		return
+	}
+
+	if !h.IsInspectionEnabled() {
+		logger.LogInfo(fmt.Sprintf("Inspection disabled: tunneling %s from %s", hostname, sourceIP))
+		reqID := logger.LogInspectionPausedRequest(sourceIP, hostname)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogInspectionPaused)
+		return
+	}
+
+	if h.IsSNIOnlyMode() {
+		fm := firewall.GetManager()
+		if fm.IsEnabled() {
+			action, _, matched := fm.MatchTraffic(hostname, sourceIP)
+			if matched && action == firewall.ActionBlock {
+				logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (firewall rule)", hostname, sourceIP))
+				reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+				conn.Close()
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "BLOCKED",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Blocked by network policy"),
+					Truncated:   false,
+				})
+				return
+			}
+		}
+
+		blockList := h.currentBlockList()
+		if blockList != nil && blockList.Matches(hostname) {
+			logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
+			reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+			logger.LogHTTPSResponse(logger.ResponseLogEntry{
+				ReqID:       reqID,
+				SourceIP:    sourceIP,
+				FQDN:        hostname,
+				Status:      "BLOCKED",
+				Headers:     http.Header{},
+				BodyPreview: []byte("Blocked by policy"),
+				Truncated:   false,
+			})
+			return
+		}
+
+		info := parseClientHello(peekedBytes)
+		metadata := formatClientHelloMetadata(info, sourceIP, upstreamAddr, upstreamPort)
+		logger.LogInfo(fmt.Sprintf("SNI-only mode: tunneling %s from %s", hostname, sourceIP))
+		reqID := logger.LogSNIRequest(sourceIP, hostname, metadata)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogSNIOnly)
+		return
+	}
+
+	if fm.IsEnabled() {
+		action, _, matched := fm.MatchTraffic(hostname, sourceIP)
+		if matched {
+			switch action {
+			case firewall.ActionBlock:
+				logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s (firewall rule)", hostname, sourceIP))
+				reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+				// For HTTPS, we can't send an HTTP response over the TLS connection.
+				// Just close the connection which shows as SSL_ERROR_SYSCALL in browser.
+				conn.Close()
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "BLOCKED",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Blocked by network policy"),
+					Truncated:   false,
+				})
+				return
+			case firewall.ActionBypass:
+				reqID := logger.LogBypassedRequest(sourceIP, hostname)
+				h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogBypassed)
+				return
+			case firewall.ActionInspect:
+				// Continue with normal inspection
+			}
+		}
+	}
+
+	blockList := h.currentBlockList()
+	bypassList := h.currentBypassList()
+
+	if blockList != nil && blockList.Matches(hostname) {
+		logger.LogInfo(fmt.Sprintf("Blocked HTTPS host %s from %s", hostname, sourceIP))
+		reqID := logger.LogTLSRequest(sourceIP, hostname, "TLS SNI")
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "BLOCKED",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Blocked by policy"),
+			Truncated:   false,
+		})
+		return
+	}
+
+	if bypassList != nil && bypassList.Matches(hostname) {
+		reqID := logger.LogBypassedRequest(sourceIP, hostname)
+		h.handleBypassedTLS(conn, hostname, sourceIP, peekedBytes, reqID, upstreamAddr, upstreamPort, tunnelLogBypassed)
+		return
+	}
+
+	certPair, err := h.certManager.GetCertificateForHost(hostname)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Certificate generation failed for %s: %v", hostname, err))
+		return
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{
+			{
+				Certificate: [][]byte{certPair.Cert.Raw, h.certManager.GetCACert().Raw},
+				PrivateKey:  certPair.Key,
+			},
+		},
+	}
+
+	// Wrap the connection to replay the bytes we read for SNI sniffing
+	rConn := &replayConn{
+		Conn:   conn,
+		replay: peekedBytes,
+	}
+
+	tlsConn := tls.Server(rConn, tlsConfig)
+	if err := tlsConn.Handshake(); err != nil {
+		logger.LogError(fmt.Sprintf("TLS handshake failed: %v", err))
+		return
+	}
+	defer tlsConn.Close()
+
+	h.handleHTTPSRequest(tlsConn, hostname, sourceIP, upstreamPort)
+}
+
+func (h *HTTPSHandler) handleBypassedTLS(clientConn net.Conn, hostname, sourceIP string, peekedBytes []byte, reqID int64, upstreamAddr string, upstreamPort int, logMode tunnelLogMode) {
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	dialHost := hostname
+	if upstreamAddr != "" {
+		dialHost = upstreamAddr
+	}
+	dialTarget := net.JoinHostPort(dialHost, strconv.Itoa(upstreamPort))
+	upstreamConn, err := h.dialTunnelTarget(dialTarget, 10*time.Second)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Bypass upstream dial failed for %s (%s): %v", hostname, dialTarget, err))
+		logTunnelResponse(reqID, sourceIP, hostname, logMode)
+		return
+	}
+	defer upstreamConn.Close()
+
+	if _, err := io.Copy(upstreamConn, bytes.NewReader(peekedBytes)); err != nil {
+		logger.LogError(fmt.Sprintf("Bypass upstream write failed for %s: %v", hostname, err))
+		logTunnelResponse(reqID, sourceIP, hostname, logMode)
+		return
+	}
+
+	errCh := make(chan error, 2)
+
+	go func() {
+		_, err := io.Copy(upstreamConn, clientConn)
+		if tcpConn, ok := upstreamConn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+		errCh <- err
+	}()
+
+	go func() {
+		_, err := io.Copy(clientConn, upstreamConn)
+		if tcpConn, ok := clientConn.(*net.TCPConn); ok {
+			_ = tcpConn.CloseWrite()
+		}
+		errCh <- err
+	}()
+
+	for i := 0; i < 2; i++ {
+		if copyErr := <-errCh; copyErr != nil && !isTunnelCompletion(copyErr) {
+			logger.LogDebug(fmt.Sprintf("HTTPS bypass stream closed for %s: %v", hostname, copyErr))
+		}
+	}
+
+	logTunnelResponse(reqID, sourceIP, hostname, logMode)
+	if logMode == tunnelLogInspectionPaused {
+		logger.LogDebug(fmt.Sprintf("HTTPS tunnelled (inspection paused): %s", hostname))
+		return
+	}
+	if logMode == tunnelLogSNIOnly {
+		logger.LogDebug(fmt.Sprintf("HTTPS tunnelled (SNI-only): %s", hostname))
+		return
+	}
+	logger.LogDebug(fmt.Sprintf("HTTPS bypassed: %s", hostname))
+}
+
+func logTunnelResponse(reqID int64, sourceIP, hostname string, logMode tunnelLogMode) {
+	switch logMode {
+	case tunnelLogInspectionPaused:
+		logger.LogInspectionPausedResponse(reqID, sourceIP, hostname)
+	case tunnelLogSNIOnly:
+		logger.LogSNIResponse(reqID, sourceIP, hostname, "TUNNELED (SNI-ONLY)")
+	default:
+		logger.LogBypassedResponse(reqID, sourceIP, hostname)
+	}
+}
+
+// handleHTTPSRequest reads the decrypted request from the TLS connection and forwards it.
+func (h *HTTPSHandler) handleHTTPSRequest(tlsConn *tls.Conn, hostname, sourceIP string, upstreamPort int) {
+	req, err := http.ReadRequest(bufioReaderFromConn(tlsConn))
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Failed to read HTTPS request: %v", err))
+		return
+	}
+
+	bodyBytes := []byte{}
+	if req.Body != nil {
+		bodyBytes, _ = io.ReadAll(req.Body)
+		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	}
+
+	if upstreamPort <= 0 {
+		upstreamPort = 443
+	}
+	upstreamAuthority := hostname
+	if upstreamPort != 443 {
+		upstreamAuthority = net.JoinHostPort(hostname, strconv.Itoa(upstreamPort))
+	}
+
+	fullURL := fmt.Sprintf("https://%s%s", upstreamAuthority, req.URL.RequestURI())
+
+	reqID := logger.LogHTTPSRequest(logger.RequestLogEntry{
+		SourceIP: sourceIP,
+		FQDN:     hostname,
+		Method:   req.Method,
+		URL:      fullURL,
+		Headers:  req.Header,
+		Body:     bodyBytes,
+	})
+
+	proxyReq, err := http.NewRequest(req.Method, fullURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Failed to create proxy request: %v", err))
+		sendHTTPError(tlsConn, http.StatusInternalServerError, "Internal Server Error")
+		return
+	}
+
+	copyHeaders(proxyReq.Header, req.Header)
+	if req.Host != "" {
+		proxyReq.Host = req.Host
+	} else {
+		proxyReq.Host = upstreamAuthority
+	}
+
+	if h.rewriter != nil && h.rewriter.ShouldForceGzip(req, hostname) {
+		// Avoid brotli upstream responses; we only support body tampering for identity/gzip/deflate.
+		proxyReq.Header.Set("Accept-Encoding", "gzip")
+	}
+
+	upstreamClient := h.upstreamClientForHost(hostname)
+	resp, err := upstreamClient.Do(proxyReq)
+	if err != nil {
+		logger.LogError(fmt.Sprintf("Upstream request failed: %v", err))
+		sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
+		logger.LogHTTPSResponse(logger.ResponseLogEntry{
+			ReqID:       reqID,
+			SourceIP:    sourceIP,
+			FQDN:        hostname,
+			Status:      "502 Bad Gateway",
+			Headers:     http.Header{},
+			BodyPreview: []byte("Bad Gateway"),
+			Truncated:   false,
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	var rewritePlan *rewrites.Plan
+	if h.rewriter != nil {
+		plan, err := h.rewriter.Plan(req, hostname, resp.StatusCode, resp.Header)
+		if err != nil {
+			logger.LogError(fmt.Sprintf("Rewrite rules reload failed: %v", err))
+		}
+		rewritePlan = plan
+	}
+
+	if rewritePlan != nil {
+		rewritePlan.ApplyHeaders(resp.Header)
+		if rewritePlan.NeedsBody() && !shouldSkipBodyTampering(resp.StatusCode, resp.Header) {
+			rawBody, err := io.ReadAll(io.LimitReader(resp.Body, maxTamperBodyBytes+1))
+			if err != nil {
+				logger.LogError(fmt.Sprintf("Failed reading upstream response body: %v", err))
+				sendHTTPError(tlsConn, http.StatusBadGateway, "Bad Gateway")
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      "502 Bad Gateway",
+					Headers:     http.Header{},
+					BodyPreview: []byte("Bad Gateway"),
+					Truncated:   false,
+				})
+				return
+			}
+
+			if len(rawBody) > maxTamperBodyBytes {
+				// Too large (or effectively streaming). Restore the body and forward it unchanged.
+				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(rawBody), resp.Body))
+				logger.LogDebug(fmt.Sprintf("HTTPS tamper skipped (body too large): %s %s -> %d", req.Method, fullURL, resp.StatusCode))
+			} else {
+				outBody, _, err := rewritePlan.RewriteBody(resp.Header, rawBody)
+				if err != nil {
+					logger.LogError(fmt.Sprintf("Response tampering failed (sending original body): %v", err))
+					outBody = rawBody
+				}
+
+				resp.Body = io.NopCloser(bytes.NewReader(outBody))
+				resp.ContentLength = int64(len(outBody))
+				resp.Header.Set("Content-Length", strconv.Itoa(len(outBody)))
+				resp.Header.Del("Transfer-Encoding")
+
+				preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
+				_, _ = preview.Write(outBody)
+
+				if err := resp.Write(tlsConn); err != nil {
+					logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
+					return
+				}
+				logger.LogHTTPSResponse(logger.ResponseLogEntry{
+					ReqID:       reqID,
+					SourceIP:    sourceIP,
+					FQDN:        hostname,
+					Status:      resp.Status,
+					Headers:     resp.Header,
+					BodyPreview: preview.Bytes(),
+					Truncated:   preview.Truncated(),
+				})
+				logger.LogDebug(fmt.Sprintf("HTTPS completed (tampered): %s %s -> %d", req.Method, fullURL, resp.StatusCode))
+				return
+			}
+		}
+	}
+
+	preview := &logger.LimitedBuffer{Max: logger.LogBodyLimit()}
+	tee := io.TeeReader(resp.Body, preview)
+	resp.Body = io.NopCloser(tee)
+
+	if err := resp.Write(tlsConn); err != nil {
+		logger.LogError(fmt.Sprintf("Failed to write response to client: %v", err))
+		return
+	}
+	logger.LogHTTPSResponse(logger.ResponseLogEntry{
+		ReqID:       reqID,
+		SourceIP:    sourceIP,
+		FQDN:        hostname,
+		Status:      resp.Status,
+		Headers:     resp.Header,
+		BodyPreview: preview.Bytes(),
+		Truncated:   preview.Truncated(),
+	})
+
+	logger.LogDebug(fmt.Sprintf("HTTPS completed: %s %s -> %d", req.Method, fullURL, resp.StatusCode))
+}
+
+// extractSNI reads the ClientHello to determine the target hostname without fully consuming the handshake bytes.
+// Note: This implementation currently consumes bytes, which may require replay logic if not handled carefully.
+// (See `replayConn` structure below if strict strict replay is needed, though currently we rely on re-reading if implementation allows).
+//
+// In this specific implementation, extractSNI consumes the ClientHello bytes.
+// The caller must be aware that the `net.Conn` passed to `tls.Server` needs to have those bytes "put back" or
+// be served by a wrapper that replays them.
+
+func (h *HTTPSHandler) extractSNI(conn net.Conn) (string, []byte, error) {
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	defer conn.SetReadDeadline(time.Time{})
+
+	// Peek/Read enough bytes for ClientHello
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return "", nil, err
+	}
+
+	hostname := parseSNI(buf[:n])
+	if hostname == "" {
+		return "", buf[:n], errNoSNI
+	}
+
+	return hostname, buf[:n], nil
+}
+
+// parseSNI attempts to find the Server Name Indication extension in the TLS ClientHello.
+func parseSNI(data []byte) string {
+	if len(data) < 43 {
+		return ""
+	}
+
+	// 0x16 = Handshake
+	if data[0] != 0x16 {
+		return ""
+	}
+
+	// 0x01 = ClientHello
+	if len(data) < 6 || data[5] != 0x01 {
+		return ""
+	}
+
+	// Skip past known fixed-length and variable-length fields (SessionID, Random, etc.)
+	// This is a minimal parser and brittle to changes in TLS versions or unusual Hello structures.
+	pos := 43 // Offset after SessionID length
+
+	if pos >= len(data) {
+		return ""
+	}
+
+	sessionIDLen := int(data[pos])
+	pos += 1 + sessionIDLen
+
+	if pos+2 >= len(data) {
+		return ""
+	}
+
+	cipherSuitesLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2 + cipherSuitesLen
+
+	if pos >= len(data) {
+		return ""
+	}
+
+	compressionLen := int(data[pos])
+	pos += 1 + compressionLen
+
+	if pos+2 >= len(data) {
+		return ""
+	}
+
+	extensionsLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+
+	endPos := pos + extensionsLen
+	for pos+4 <= endPos && pos+4 <= len(data) {
+		extType := int(data[pos])<<8 | int(data[pos+1])
+		extLen := int(data[pos+2])<<8 | int(data[pos+3])
+		pos += 4
+
+		if extType == 0 { // 0x00 is SNI
+			if pos+extLen > len(data) {
+				return ""
+			}
+			return parseSNIExtension(data[pos : pos+extLen])
+		}
+
+		pos += extLen
+	}
+
+	return ""
+}
+
+func parseSNIExtension(data []byte) string {
+	if len(data) < 5 {
+		return ""
+	}
+
+	pos := 2
+	// Name Type: 0x00 (HostName)
+	if data[pos] != 0 {
+		return ""
+	}
+	pos++
+
+	nameLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+
+	if pos+nameLen > len(data) {
+		return ""
+	}
+
+	return string(data[pos : pos+nameLen])
+}
+
+// ClientHelloInfo captures the maximum amount of metadata we can extract from
+// a TLS ClientHello without performing MITM. It powers SNI-only mode.
+type ClientHelloInfo struct {
+	SNI             string
+	RecordVersion   uint16   // TLS record-layer version (bytes 1-2 of record)
+	ClientVersion   uint16   // ClientHello.legacy_version
+	CipherSuites    []uint16 // offered cipher suites
+	Compression     []byte   // offered compression methods
+	Extensions      []uint16 // extension type IDs in order
+	ALPN            []string // ALPN protocol list
+	SupportedGroups []uint16 // extension 10 (supported_groups)
+	SignatureAlgs   []uint16 // extension 13 (signature_algorithms)
+	ServerNameList  bool     // whether SNI list had more than one entry
+}
+
+// ponytail: minimal ClientHello walker. We only parse enough to populate
+// ClientHelloInfo; we do not validate every byte. If a field would need more
+// than a couple of length-checks to extract, we leave it empty.
+//
+// Upgrade path: replace with a maintained parser (e.g. ja3-style extractor)
+// if precision matters for fingerprinting.
+func parseClientHello(data []byte) ClientHelloInfo {
+	var info ClientHelloInfo
+	if len(data) < 43 || data[0] != 0x16 {
+		return info
+	}
+	if data[5] != 0x01 {
+		return info
+	}
+
+	info.RecordVersion = uint16(data[1])<<8 | uint16(data[2])
+	info.ClientVersion = uint16(data[9])<<8 | uint16(data[10])
+
+	pos := 43 // session_id length offset
+	if pos >= len(data) {
+		return info
+	}
+	sessionIDLen := int(data[pos])
+	pos += 1 + sessionIDLen
+	if pos+2 > len(data) {
+		return info
+	}
+
+	cipherSuitesLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+	if pos+cipherSuitesLen > len(data) {
+		return info
+	}
+	for i := 0; i+2 <= cipherSuitesLen; i += 2 {
+		info.CipherSuites = append(info.CipherSuites, uint16(data[pos+i])<<8|uint16(data[pos+i+1]))
+	}
+	pos += cipherSuitesLen
+
+	if pos >= len(data) {
+		return info
+	}
+	compressionLen := int(data[pos])
+	pos++
+	if pos+compressionLen > len(data) {
+		return info
+	}
+	info.Compression = append(info.Compression, data[pos:pos+compressionLen]...)
+	pos += compressionLen
+
+	if pos+2 > len(data) {
+		return info
+	}
+	extensionsLen := int(data[pos])<<8 | int(data[pos+1])
+	pos += 2
+	endPos := pos + extensionsLen
+
+	for pos+4 <= endPos && pos+4 <= len(data) {
+		extType := uint16(data[pos])<<8 | uint16(data[pos+1])
+		extLen := int(data[pos+2])<<8 | int(data[pos+3])
+		pos += 4
+		if pos+extLen > len(data) {
+			break
+		}
+		info.Extensions = append(info.Extensions, extType)
+		extData := data[pos : pos+extLen]
+		switch extType {
+		case 0: // server_name
+			if listLen := int(extData[0])<<8 | int(extData[1]); listLen > 0 && 2+5 <= len(extData) {
+				// ponytail: SNI list length tells us if the client offered more
+				// than one server name; useful for fingerprinting.
+				info.ServerNameList = listLen > 0
+			}
+			info.SNI = parseSNIExtension(extData)
+		case 16: // ALPN
+			info.ALPN = parseALPNExtension(extData)
+		case 10: // supported_groups
+			info.SupportedGroups = parseUint16ListExtension(extData)
+		case 13: // signature_algorithms
+			info.SignatureAlgs = parseUint16ListExtension(extData)
+		}
+		pos += extLen
+	}
+
+	return info
+}
+
+func parseALPNExtension(data []byte) []string {
+	if len(data) < 2 {
+		return nil
+	}
+	listLen := int(data[0])<<8 | int(data[1])
+	if listLen+2 > len(data) {
+		return nil
+	}
+	pos := 2
+	end := 2 + listLen
+	var out []string
+	for pos < end && pos < len(data) {
+		strLen := int(data[pos])
+		pos++
+		if pos+strLen > len(data) {
+			break
+		}
+		out = append(out, string(data[pos:pos+strLen]))
+		pos += strLen
+	}
+	return out
+}
+
+func parseUint16ListExtension(data []byte) []uint16 {
+	if len(data) < 2 {
+		return nil
+	}
+	listLen := int(data[0])<<8 | int(data[1])
+	if listLen+2 > len(data) {
+		return nil
+	}
+	var out []uint16
+	for i := 0; i+2 <= listLen && 2+i+2 <= len(data); i += 2 {
+		out = append(out, uint16(data[2+i])<<8|uint16(data[2+i+1]))
+	}
+	return out
+}
+
+// formatClientHelloMetadata renders ClientHelloInfo for SQLite logging.
+// ponytail: text format keeps things greppable and avoids pulling in a
+// JSON encoder for the request/response columns. The format is also stable
+// for the dashboard traffic view.
+func formatClientHelloMetadata(info ClientHelloInfo, sourceIP, upstreamAddr string, upstreamPort int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "TLS Version (record): %s\n", tlsVersionName(info.RecordVersion))
+	fmt.Fprintf(&b, "TLS Version (client): %s\n", tlsVersionName(info.ClientVersion))
+	fmt.Fprintf(&b, "Source IP: %s\n", sourceIP)
+	if upstreamAddr != "" {
+		fmt.Fprintf(&b, "Original Destination: %s:%d\n", upstreamAddr, upstreamPort)
+	}
+	fmt.Fprintf(&b, "Cipher Suites (%d):\n", len(info.CipherSuites))
+	for _, c := range info.CipherSuites {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", c, tlsnames.CipherSuite(c))
+	}
+	fmt.Fprintf(&b, "Compression Methods (%d):\n", len(info.Compression))
+	for _, c := range info.Compression {
+		fmt.Fprintf(&b, "  0x%02x = %s\n", c, tlsnames.CompressionMethod(c))
+	}
+	fmt.Fprintf(&b, "ALPN (%d):\n", len(info.ALPN))
+	for _, p := range info.ALPN {
+		fmt.Fprintf(&b, "  %q = %s\n", p, tlsnames.ALPN(p))
+	}
+	fmt.Fprintf(&b, "Extensions (%d):\n", len(info.Extensions))
+	for _, e := range info.Extensions {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", e, tlsnames.ExtensionType(e))
+	}
+	fmt.Fprintf(&b, "Supported Groups (%d):\n", len(info.SupportedGroups))
+	for _, g := range info.SupportedGroups {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", g, tlsnames.SupportedGroup(g))
+	}
+	fmt.Fprintf(&b, "Signature Algorithms (%d):\n", len(info.SignatureAlgs))
+	for _, a := range info.SignatureAlgs {
+		fmt.Fprintf(&b, "  0x%04x = %s\n", a, tlsnames.SignatureScheme(a))
+	}
+	if info.ServerNameList {
+		fmt.Fprintf(&b, "Multi-SNI: true\n")
+	}
+	return b.String()
+}
+
+// tlsVersionName converts a 16-bit TLS version identifier to its colloquial
+// name. Values not assigned by IANA fall back to the hex form.
+func tlsVersionName(v uint16) string {
+	switch v {
+	case 0x0300:
+		return "SSL 3.0"
+	case 0x0301:
+		return "TLS 1.0"
+	case 0x0302:
+		return "TLS 1.1"
+	case 0x0303:
+		return "TLS 1.2"
+	case 0x0304:
+		return "TLS 1.3"
+	default:
+		return fmt.Sprintf("0x%04x", v)
+	}
+}
+
+type replayConn struct {
+	net.Conn
+	replay []byte
+	rpos   int
+}
+
+func (rc *replayConn) Read(b []byte) (int, error) {
+	if rc.rpos < len(rc.replay) {
+		n := copy(b, rc.replay[rc.rpos:])
+		rc.rpos += n
+		return n, nil
+	}
+	return rc.Conn.Read(b)
+}
+
+func bufioReaderFromConn(conn net.Conn) *bufio.Reader {
+	return bufio.NewReader(conn)
+}
+
+func sendHTTPError(conn net.Conn, statusCode int, message string) {
+	response := fmt.Sprintf("HTTP/1.1 %d %s\r\nContent-Length: %d\r\n\r\n%s",
+		statusCode, http.StatusText(statusCode), len(message), message)
+	conn.Write([]byte(response))
+}
+
+func sourceIPFromAddr(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+	return host
+}
+
+func isTunnelCompletion(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrClosedPipe)
+}

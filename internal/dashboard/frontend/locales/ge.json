@@ -1,0 +1,380 @@
+{
+  "meta": {
+    "code": "de",
+    "name": "German",
+    "native_name": "Deutsch"
+  },
+  "strings": {
+    "app": {
+      "title": "SSL-Inspektionsrouter-Konsole"
+    },
+    "language": {
+      "label": "Sprache"
+    },
+    "login": {
+      "eyebrow": "Betrieb",
+      "subtitle": "Melden Sie sich an, um auf Verkehrsanalysen, Inspektionssteuerungen und Benutzerverwaltung zuzugreifen.",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "submit": "Anmelden",
+      "defaultCredentialsHtml": "Standard-Anmeldedaten: <code>admin / admin123</code>",
+      "errors": {
+        "required": "Benutzername und Passwort sind erforderlich."
+      }
+    },
+    "nav": {
+      "traffic": "Verkehr",
+      "rewrites": "Umschreibungen",
+      "firewall": "Firewall",
+      "users": "Benutzer"
+    },
+    "sidebar": {
+      "title": "Betriebskonsole",
+      "rulesLoaded": "Regeln geladen",
+      "bodyArtifacts": "Body-Artefakte",
+      "dropEntries": "Drop-Einträge",
+      "bypassEntries": "Bypass-Einträge",
+      "openRewriteStudio": "Rewrite-Studio öffnen"
+    },
+    "settings": {
+      "title": "Kontrollzentrum",
+      "subtitle": "Live-Routing-Steuerung und Richtlinienverwaltung.",
+      "runtime": "Laufzeit",
+      "inspection": "Inspektion",
+      "truncateLogBodies": "Protokollinhalte kürzen",
+      "logNothing": "Nichts protokollieren",
+      "wireguardEgress": "WireGuard-Ausgang",
+      "torEgress": "Tor-Ausgang",
+      "bodyArtifacts": "Body-Artefakte",
+      "artifactStoragePath": "Artefaktspeicherpfad",
+      "artifactDirectoryPlaceholder": "Artefaktverzeichnis",
+      "setPath": "Pfad festlegen",
+      "wireguardClientConfig": "WireGuard-Client-Konfiguration",
+      "wireguardNoteHtml": "Fügen Sie oben eine WireGuard-Client-Konfiguration ein. Die Konfiguration wird automatisch in <code>/etc/wireguard/wg0.conf</code> gespeichert und angewendet, wenn Sie den Tunnel aktivieren.",
+      "saveWireGuardConfig": "WireGuard-Konfiguration speichern",
+      "tunnel": "Tunnel",
+      "torSection": "Tor-Ausgang",
+      "torNoteHtml": "Erfordert Tor SOCKS-Endpunkt (Standard <code>127.0.0.1:9050</code>).",
+      "torRoute": "Tor-Route",
+      "trafficPolicy": "Verkehrsrichtlinie",
+      "trafficPolicyHint": "Eine pro Zeile oder kommagetrennt. Unterstützt Domains, IPs und CIDRs.",
+      "dropList": "Drop-Liste",
+      "bypassList": "Bypass-Liste",
+      "savePolicy": "Richtlinie speichern",
+      "startupProfile": "Startprofil",
+      "startupProfileNote": "Nur sichtbar. Änderungen erfordern einen Neustart.",
+      "allowQuic": "QUIC erlauben",
+      "tlsPorts": "TLS-Ports",
+      "inspectOnly": "Nur Inspektion",
+      "pcapPath": "PCAP-Pfad",
+      "currentEgress": "Aktueller Ausgang",
+      "defaultEgress": "Standardausgang",
+      "saving": "Speichern...",
+      "saved": "Gespeichert."
+    },
+    "metrics": {
+      "connectionLabel": "Verbindung",
+      "databaseSizeLabel": "Datenbankgröße",
+      "capturedRequestsLabel": "Erfasste Anfragen"
+    },
+    "actions": {
+      "logout": "Abmelden",
+      "refresh": "Aktualisieren",
+      "close": "Schließen",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "remove": "Entfernen"
+    },
+    "theme": {
+      "light": "hell",
+      "dark": "dunkel",
+      "switchTo": "Wechseln zu {theme}-Design"
+    },
+    "traffic": {
+      "title": "Verkehrsmonitor",
+      "searchPlaceholder": "Host, Quell-IP, Status suchen...",
+      "flush": "Verkehr löschen",
+      "flushTitle": "Erfassten Verkehr löschen",
+      "flushConfirm": "Erfassten Verkehr aus der Datenbank löschen und die Ansicht leeren?",
+      "flushing": "Löschen...",
+      "request": "Anfrage",
+      "response": "Antwort",
+      "detailTitle": "Verkehr #{id}",
+      "detailModalTitle": "Verkehrsdetails",
+      "empty": "Keine erfassten Daten für diese Anfrage.",
+      "summaryEmpty": "0 Ergebnisse",
+      "summaryRange": "{start}-{end} von {total} Ergebnissen",
+      "modes": {
+        "all": "Alle Modi",
+        "inspected": "Inspiziert",
+        "paused": "Inspektion pausiert",
+        "bypassed": "Umgangen",
+        "blocked": "Blockiert"
+      },
+      "table": {
+        "time": "Zeit",
+        "mode": "Modus",
+        "method": "Methode",
+        "host": "Host",
+        "url": "URL",
+        "source": "Quelle",
+        "status": "Status"
+      }
+    },
+    "pagination": {
+      "previous": "Zurück",
+      "next": "Weiter"
+    },
+    "rewrites": {
+      "title": "Rewrite-Richtlinienstudio",
+      "newRule": "Neue Regel",
+      "reload": "Neu laden",
+      "loadedRules": "Geladene Regeln",
+      "saveRule": "Regel speichern",
+      "deleteRule": "Regel löschen",
+      "cloneToManaged": "In verwaltete Regeln klonen",
+      "newRuleTitle": "Neue Rewrite-Regel",
+      "managedRule": "Verwaltete Regel",
+      "managedRuleNumber": "Verwaltete Regel #{id}",
+      "readOnlyMode": "Nur-Lese-Modus",
+      "managedFileValue": "verwaltete Datei: {file}",
+      "managedFileEmpty": "verwaltete Datei: -",
+      "externalRuleFrom": "Externe Regel aus {file}",
+      "discardUnsavedChanges": "Nicht gespeicherte Änderungen verwerfen?",
+      "deleteConfirm": "Rewrite-Regel \"{name}\" löschen?",
+      "empty": "Keine Rewrite-Regeln geladen.",
+      "badges": {
+        "managed": "Verwaltet",
+        "external": "Extern"
+      },
+      "actionCount": {
+        "one": "{status} • 1 Aktion",
+        "other": "{status} • {count} Aktionen"
+      },
+      "fields": {
+        "enabled": "Aktiviert",
+        "ruleName": "Regelname",
+        "matchHost": "Host abgleichen",
+        "matchHostRegex": "Host Regex",
+        "pathPrefix": "Pfadpräfix",
+        "pathRegex": "Pfad Regex",
+        "method": "Methode",
+        "methods": "Methoden (Komma/Zeile)",
+        "status": "Status",
+        "statuses": "Status (Komma/Zeile)",
+        "contentTypeContains": "Content-Type enthält",
+        "contentTypeRegex": "Content-Type Regex",
+        "deleteHeaders": "Header löschen (Komma/Zeile)",
+        "requestHeaderContains": "Request-Header enthält",
+        "responseHeaderContains": "Response-Header enthält",
+        "setHeaders": "Header setzen",
+        "addHeaders": "Header hinzufügen",
+        "bodyReplace": "Body ersetzen",
+        "bodyRegexReplace": "Body Regex ersetzen"
+      },
+      "placeholders": {
+        "headerValue": "Header-Name: Wert",
+        "replaceBody": "von => zu",
+        "replaceBodyRegex": "Muster => Ersatz"
+      },
+      "labels": {
+        "from": "von",
+        "to": "zu",
+        "pattern": "Muster",
+        "replace": "ersetzen"
+      },
+      "errors": {
+        "positiveIntegers": "{label} müssen positive Ganzzahlen sein.",
+        "headerFormat": "{label} muss im Format \"Header: Wert\" sein.",
+        "headerNameAndValue": "{label} muss Name und Wert enthalten.",
+        "replacementFormat": "Verwenden Sie \"{left} => {right}\" pro Zeile.",
+        "valueCannotBeEmpty": "\"{label}\" darf nicht leer sein.",
+        "ruleNameRequired": "Regelname ist erforderlich.",
+        "statusPositiveInteger": "Status muss positiv sein.",
+        "actionRequired": "Mindestens eine Aktion erforderlich."
+      },
+      "summary": {
+        "host": "host={value}",
+        "hostRegex": "host regex",
+        "pathPrefix": "pfad^={value}",
+        "pathRegex": "pfad regex",
+        "method": "methode={value}",
+        "methods": "methoden={count}",
+        "status": "status={value}",
+        "statuses": "status={count}",
+        "contentTypeContains": "ct~={value}",
+        "contentTypeRegex": "ct regex",
+        "matchesAllResponses": "passt auf alle Antworten"
+      },
+      "status": {
+        "saving": "Speichern...",
+        "saved": "Gespeichert.",
+        "deleting": "Löschen...",
+        "deleted": "Gelöscht.",
+        "cloning": "Klonen...",
+        "cloned": "Geklont.",
+        "waitingForStableSnapshot": "Warte auf stabilen Snapshot...",
+        "refreshFailed": "Aktualisierung fehlgeschlagen.",
+        "warning": "Warnung: {warning}"
+      }
+    },
+    "roles": {
+      "viewer": "Betrachter",
+      "operator": "Operator",
+      "admin": "Administrator"
+    },
+    "status": {
+      "connected": "Verbunden",
+      "disconnected": "Getrennt",
+      "enabled": "aktiviert",
+      "disabled": "deaktiviert",
+      "blocked": "blockiert",
+      "default": "Standard",
+      "allSources": "alle Quellen",
+      "active": "aktiv",
+      "inactive": "inaktiv",
+      "noConfig": "keine Konfiguration",
+      "offline": "offline"
+    },
+    "session": {
+      "expired": "Sitzung abgelaufen. Bitte erneut anmelden."
+    },
+    "users": {
+      "title": "Benutzerverwaltung",
+      "adminRequired": "Administratorrechte erforderlich",
+      "empty": "Keine Benutzer vorhanden.",
+      "lastLoginNever": "Nie",
+      "deleteConfirm": "Benutzer {username} löschen?",
+      "state": {
+        "active": "Aktiv",
+        "disabled": "Deaktiviert"
+      },
+      "table": {
+        "username": "Benutzername",
+        "displayName": "Anzeigename",
+        "role": "Rolle",
+        "state": "Status",
+        "lastLogin": "Letzte Anmeldung"
+      },
+      "form": {
+        "username": "Benutzername",
+        "displayName": "Anzeigename",
+        "displayNamePlaceholder": "Operations Analyst",
+        "role": "Rolle",
+        "password": "Passwort",
+        "passwordPlaceholder": "Mindestens 8 Zeichen",
+        "active": "Aktiv",
+        "cancelEdit": "Bearbeitung abbrechen",
+        "createTitle": "Benutzer erstellen",
+        "editTitle": "Benutzer bearbeiten: {username}",
+        "submitCreate": "Benutzer erstellen",
+        "submitUpdate": "Benutzer aktualisieren"
+      }
+    },
+    "wireguard": {
+      "disableTorFirst": "Deaktivieren Sie zuerst Tor, bevor Sie WireGuard aktivieren.",
+      "enabling": "Tunnel wird aktiviert...",
+      "disabling": "Tunnel wird deaktiviert...",
+      "enabled": "WireGuard-Tunnel aktiviert.",
+      "disabled": "WireGuard-Tunnel deaktiviert.",
+      "savingConfig": "Konfiguration wird gespeichert...",
+      "configSaved": "Konfiguration gespeichert.",
+      "configSavedApply": "Gespeichert. Tunnel neu starten, um anzuwenden.",
+      "errors": {
+        "configEmpty": "Konfiguration darf nicht leer sein."
+      }
+    },
+    "tor": {
+      "disableWireGuardFirst": "Deaktivieren Sie zuerst WireGuard, bevor Sie Tor aktivieren.",
+      "enabling": "Tor wird aktiviert...",
+      "disabling": "Tor wird deaktiviert...",
+      "enabled": "Tor aktiviert.",
+      "disabled": "Tor deaktiviert."
+    },
+    "artifacts": {
+      "errors": {
+        "directoryEmpty": "Verzeichnis darf nicht leer sein."
+      }
+    },
+    "errors": {
+      "networkRequestFailed": "Netzwerkanfrage fehlgeschlagen",
+      "requestFailed": "Anfrage fehlgeschlagen ({status})"
+    },
+    "firewall": {
+      "title": "Firewall-Regeln",
+      "modeLabel": "Firewall-Modus",
+      "addRule": "Regel hinzufügen",
+      "rules": "Regeln",
+      "tabs": {
+        "rules": "Regeln",
+        "outbound": "Ausgehende Ports"
+      },
+      "outbound": {
+        "title": "Ausgehende Ports",
+        "description": "Beschränken Sie weitergeleiteten Verkehr auf eine Liste erlaubter Zielports. Die Liste wird als iptables-Allowlist mit DROP-Standardaktion erzwungen und ist nur aktiv, wenn der Firewall-Modus eingeschaltet ist. Standardregelsatz: HTTPS (TCP 443) und DNS (TCP/UDP 53).",
+        "empty": "Keine ausgehenden Ports konfiguriert.",
+        "table": {
+          "port": "Port",
+          "protocol": "Protokoll"
+        },
+        "fields": {
+          "port": "Port",
+          "protocol": "Protokoll"
+        },
+        "protocols": {
+          "tcp": "TCP",
+          "udp": "UDP"
+        },
+        "add": "Hinzufügen",
+        "save": "Ausgehende Ports speichern",
+        "status": {
+          "saving": "Speichern...",
+          "saved": "Gespeichert."
+        },
+        "errors": {
+          "invalidEntry": "Port muss 1-65535 sein, Protokoll TCP oder UDP.",
+          "duplicate": "Diese Kombination aus Port und Protokoll ist bereits in der Liste."
+        }
+      },
+      "defaultNote": "Der Firewall-Modus wendet nur passende Regeln an. Nicht passender HTTP- und HTTPS-Verkehr laeuft normal weiter.",
+      "empty": "Keine Firewall-Regeln konfiguriert.",
+      "newRuleTitle": "Neue Firewall-Regel",
+      "saveRule": "Regel speichern",
+      "updateRule": "Regel aktualisieren",
+      "deleteRule": "Regel löschen",
+      "cancelEdit": "Abbrechen",
+      "deleteConfirm": "Diese Firewall-Regel löschen?",
+      "discardUnsavedChanges": "Ungespeicherte Änderungen verwerfen?",
+      "matchAll": "entspricht allem Verkehr",
+      "fields": {
+        "enabled": "Aktiviert",
+        "action": "Aktion",
+        "blockMode": "Blockierungsmodus",
+        "priority": "Priorität (höher = zuerst)",
+        "host": "Host",
+        "hostRegex": "Host Regex",
+        "ip": "IP-Adresse",
+        "cidr": "CIDR",
+        "matchConditions": "Übereinstimmungsbedingungen"
+      },
+      "actions": {
+        "block": "Blockieren",
+        "bypass": "Umghehen",
+        "inspect": "Inspizieren"
+      },
+      "blockModes": {
+        "displayPage": "Blockierungsseite anzeigen",
+        "silentDrop": "Stilles Fallenlassen"
+      },
+      "status": {
+        "saving": "Speichern...",
+        "saved": "Gespeichert.",
+        "deleting": "Löschen...",
+        "deleted": "Gelöscht."
+      },
+      "errors": {
+        "invalidAction": "Aktion muss blockieren, umgehen oder inspizieren sein."
+      }
+    }
+  }
+}

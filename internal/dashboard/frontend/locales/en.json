@@ -1,0 +1,382 @@
+{
+  "meta": {
+    "code": "en",
+    "name": "English",
+    "native_name": "English"
+  },
+  "strings": {
+    "app": {
+      "title": "SSL Inspecting Router Console"
+    },
+    "language": {
+      "label": "Language"
+    },
+    "login": {
+      "eyebrow": "Operations",
+      "subtitle": "Sign in to access traffic analytics, inspection controls, and user administration.",
+      "username": "Username",
+      "password": "Password",
+      "submit": "Sign In",
+      "defaultCredentialsHtml": "Default bootstrap credentials: <code>admin / admin123</code>",
+      "errors": {
+        "required": "Username and password are required."
+      }
+    },
+    "nav": {
+      "traffic": "Traffic",
+      "rewrites": "Rewrites",
+      "firewall": "Firewall",
+      "users": "Users"
+    },
+    "sidebar": {
+      "title": "Operations Console",
+      "rulesLoaded": "Rules Loaded",
+      "bodyArtifacts": "Body Artifacts",
+      "dropEntries": "Drop Entries",
+      "bypassEntries": "Bypass Entries",
+      "openRewriteStudio": "Open Rewrite Studio"
+    },
+    "settings": {
+      "title": "Control Center",
+      "subtitle": "Live routing controls and policy management.",
+      "runtime": "Runtime",
+      "inspection": "Inspection",
+      "truncateLogBodies": "Truncate Log Bodies",
+      "logNothing": "Log Nothing",
+      "sniOnlyMode": "SNI-only Mode",
+      "wireguardEgress": "WireGuard Egress",
+      "torEgress": "Tor Egress",
+      "bodyArtifacts": "Body Artifacts",
+      "artifactStoragePath": "Artifact Storage Path",
+      "artifactDirectoryPlaceholder": "Artifact directory",
+      "setPath": "Set Path",
+      "wireguardClientConfig": "WireGuard Client Config",
+      "wireguardNoteHtml": "Paste a WireGuard client config above. The config is automatically saved and applied to <code>/etc/wireguard/wg0.conf</code> when you enable tunnel.",
+      "saveWireGuardConfig": "Save WireGuard Config",
+      "tunnel": "Tunnel",
+      "torSection": "Tor Egress",
+      "torNoteHtml": "Requires Tor SOCKS endpoint (default <code>127.0.0.1:9050</code>).",
+      "torRoute": "Tor Route",
+      "trafficPolicy": "Traffic Policy",
+      "trafficPolicyHint": "One per line or comma-separated. Supports domains, IPs, and CIDRs.",
+      "dropList": "Drop List",
+      "bypassList": "Bypass List",
+      "savePolicy": "Save Policy",
+      "startupProfile": "Startup Profile",
+      "startupProfileNote": "Visibility only. Changes require restart.",
+      "allowQuic": "Allow QUIC",
+      "tlsPorts": "TLS Ports",
+      "inspectOnly": "Inspect-Only",
+      "pcapPath": "PCAP Path",
+      "currentEgress": "Current Egress",
+      "defaultEgress": "Default Egress",
+      "saving": "Saving...",
+      "saved": "Saved."
+    },
+    "metrics": {
+      "connectionLabel": "Connection",
+      "databaseSizeLabel": "Database Size",
+      "capturedRequestsLabel": "Captured Requests"
+    },
+    "actions": {
+      "logout": "Logout",
+      "refresh": "Refresh",
+      "close": "Close",
+      "edit": "Edit",
+      "delete": "Delete",
+      "remove": "Remove"
+    },
+    "theme": {
+      "light": "light",
+      "dark": "dark",
+      "switchTo": "Switch to {theme} theme"
+    },
+    "traffic": {
+      "title": "Traffic Monitor",
+      "searchPlaceholder": "Search host, source IP, status...",
+      "flush": "Flush Traffic",
+      "flushTitle": "Delete captured traffic",
+      "flushConfirm": "Flush captured traffic from the database and clear the Traffic view?",
+      "flushing": "Flushing...",
+      "request": "Request",
+      "response": "Response",
+      "detailTitle": "Traffic #{id}",
+      "detailModalTitle": "Traffic Detail",
+      "empty": "No captured traffic for this query.",
+      "summaryEmpty": "0 results",
+      "summaryRange": "{start}-{end} of {total} results",
+      "modes": {
+        "all": "All Modes",
+        "inspected": "Inspected",
+        "paused": "Inspection Paused",
+        "sni": "SNI-only",
+        "bypassed": "Bypassed",
+        "blocked": "Blocked"
+      },
+      "table": {
+        "time": "Time",
+        "mode": "Mode",
+        "method": "Method",
+        "host": "Host",
+        "url": "URL",
+        "source": "Source",
+        "status": "Status"
+      }
+    },
+    "pagination": {
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "rewrites": {
+      "title": "Rewrite Policy Studio",
+      "newRule": "New Rule",
+      "reload": "Reload",
+      "loadedRules": "Loaded Rules",
+      "saveRule": "Save Rule",
+      "deleteRule": "Delete Rule",
+      "cloneToManaged": "Clone to Managed",
+      "newRuleTitle": "New Rewrite Rule",
+      "managedRule": "Managed rule",
+      "managedRuleNumber": "Managed rule #{id}",
+      "readOnlyMode": "Read-only mode",
+      "managedFileValue": "managed file: {file}",
+      "managedFileEmpty": "managed file: -",
+      "externalRuleFrom": "External rule from {file}",
+      "discardUnsavedChanges": "Discard unsaved rewrite changes?",
+      "deleteConfirm": "Delete rewrite rule \"{name}\"?",
+      "empty": "No rewrite rules loaded.",
+      "badges": {
+        "managed": "Managed",
+        "external": "External"
+      },
+      "actionCount": {
+        "one": "{status} • 1 action",
+        "other": "{status} • {count} actions"
+      },
+      "fields": {
+        "enabled": "Enabled",
+        "ruleName": "Rule Name",
+        "matchHost": "Match Host",
+        "matchHostRegex": "Match Host Regex",
+        "pathPrefix": "Path Prefix",
+        "pathRegex": "Path Regex",
+        "method": "Method",
+        "methods": "Methods (comma/newline)",
+        "status": "Status",
+        "statuses": "Statuses (comma/newline)",
+        "contentTypeContains": "Content-Type Contains",
+        "contentTypeRegex": "Content-Type Regex",
+        "deleteHeaders": "Delete Headers (comma/newline)",
+        "requestHeaderContains": "Request Header Contains",
+        "responseHeaderContains": "Response Header Contains",
+        "setHeaders": "Set Headers",
+        "addHeaders": "Add Headers",
+        "bodyReplace": "Body Replace",
+        "bodyRegexReplace": "Body Regex Replace"
+      },
+      "placeholders": {
+        "headerValue": "Header-Name: value",
+        "replaceBody": "from => to",
+        "replaceBodyRegex": "pattern => replacement"
+      },
+      "labels": {
+        "from": "from",
+        "to": "to",
+        "pattern": "pattern",
+        "replace": "replace"
+      },
+      "errors": {
+        "positiveIntegers": "{label} must be positive integers.",
+        "headerFormat": "{label} lines must be in \"Header: value\" format.",
+        "headerNameAndValue": "{label} lines must include both header name and value.",
+        "replacementFormat": "Use \"{left} => {right}\" format per line.",
+        "valueCannotBeEmpty": "\"{label}\" value cannot be empty.",
+        "ruleNameRequired": "Rule name is required.",
+        "statusPositiveInteger": "Status must be a positive integer.",
+        "actionRequired": "At least one rewrite action is required."
+      },
+      "summary": {
+        "host": "host={value}",
+        "hostRegex": "host regex",
+        "pathPrefix": "path^={value}",
+        "pathRegex": "path regex",
+        "method": "method={value}",
+        "methods": "methods={count}",
+        "status": "status={value}",
+        "statuses": "statuses={count}",
+        "contentTypeContains": "ct~={value}",
+        "contentTypeRegex": "ct regex",
+        "matchesAllResponses": "matches all responses"
+      },
+      "status": {
+        "saving": "Saving...",
+        "saved": "Saved.",
+        "deleting": "Deleting...",
+        "deleted": "Deleted.",
+        "cloning": "Cloning...",
+        "cloned": "Cloned.",
+        "waitingForStableSnapshot": "Waiting for stable rewrite snapshot...",
+        "refreshFailed": "Rewrite list refresh failed. Showing last loaded snapshot.",
+        "warning": "Warning: {warning}"
+      }
+    },
+    "roles": {
+      "viewer": "Viewer",
+      "operator": "Operator",
+      "admin": "Admin"
+    },
+    "status": {
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "enabled": "enabled",
+      "disabled": "disabled",
+      "blocked": "blocked",
+      "default": "default",
+      "allSources": "all sources",
+      "active": "active",
+      "inactive": "inactive",
+      "noConfig": "no config",
+      "offline": "offline"
+    },
+    "session": {
+      "expired": "Session expired. Please sign in again."
+    },
+    "users": {
+      "title": "User Management",
+      "adminRequired": "Admin role required",
+      "empty": "No users available.",
+      "lastLoginNever": "Never",
+      "deleteConfirm": "Delete user {username}?",
+      "state": {
+        "active": "Active",
+        "disabled": "Disabled"
+      },
+      "table": {
+        "username": "Username",
+        "displayName": "Display Name",
+        "role": "Role",
+        "state": "State",
+        "lastLogin": "Last Login"
+      },
+      "form": {
+        "username": "Username",
+        "displayName": "Display Name",
+        "displayNamePlaceholder": "Operations Analyst",
+        "role": "Role",
+        "password": "Password",
+        "passwordPlaceholder": "Minimum 8 characters",
+        "active": "Active",
+        "cancelEdit": "Cancel Edit",
+        "createTitle": "Create User",
+        "editTitle": "Edit User: {username}",
+        "submitCreate": "Create User",
+        "submitUpdate": "Update User"
+      }
+    },
+    "wireguard": {
+      "disableTorFirst": "Disable Tor egress before enabling WireGuard.",
+      "enabling": "Enabling tunnel...",
+      "disabling": "Disabling tunnel...",
+      "enabled": "WireGuard tunnel enabled.",
+      "disabled": "WireGuard tunnel disabled.",
+      "savingConfig": "Saving config...",
+      "configSaved": "WireGuard config saved.",
+      "configSavedApply": "Config saved. Toggle tunnel off/on to apply.",
+      "errors": {
+        "configEmpty": "WireGuard config cannot be empty."
+      }
+    },
+    "tor": {
+      "disableWireGuardFirst": "Disable WireGuard egress before enabling Tor.",
+      "enabling": "Enabling Tor egress...",
+      "disabling": "Disabling Tor egress...",
+      "enabled": "Tor egress enabled.",
+      "disabled": "Tor egress disabled."
+    },
+    "artifacts": {
+      "errors": {
+        "directoryEmpty": "Artifact directory cannot be empty."
+      }
+    },
+    "errors": {
+      "networkRequestFailed": "Network request failed",
+      "requestFailed": "Request failed ({status})"
+    },
+    "firewall": {
+      "title": "Firewall Rules",
+      "modeLabel": "Firewall Mode",
+      "addRule": "Add Rule",
+      "rules": "Rules",
+      "tabs": {
+        "rules": "Rules",
+        "outbound": "Outbound Ports"
+      },
+      "outbound": {
+        "title": "Outbound Ports",
+        "description": "Restrict forwarded traffic to a specific list of destination ports. The list is enforced as a default-DROP iptables allowlist and is only active when Firewall Mode is on. Default rule set: HTTPS (TCP 443) and DNS (TCP/UDP 53).",
+        "empty": "No outbound ports configured.",
+        "table": {
+          "port": "Port",
+          "protocol": "Protocol"
+        },
+        "fields": {
+          "port": "Port",
+          "protocol": "Protocol"
+        },
+        "protocols": {
+          "tcp": "TCP",
+          "udp": "UDP"
+        },
+        "add": "Add",
+        "save": "Save Outbound Ports",
+        "status": {
+          "saving": "Saving...",
+          "saved": "Saved."
+        },
+        "errors": {
+          "invalidEntry": "Port must be 1-65535 and protocol must be TCP or UDP.",
+          "duplicate": "That port/protocol combination is already in the list."
+        }
+      },
+      "defaultNote": "Firewall mode applies only matching rules. Unmatched HTTP and HTTPS traffic continues normally.",
+      "empty": "No firewall rules configured.",
+      "newRuleTitle": "New Firewall Rule",
+      "saveRule": "Save Rule",
+      "updateRule": "Update Rule",
+      "deleteRule": "Delete Rule",
+      "cancelEdit": "Cancel",
+      "deleteConfirm": "Delete this firewall rule?",
+      "discardUnsavedChanges": "Discard unsaved firewall rule changes?",
+      "matchAll": "matches all traffic",
+      "fields": {
+        "enabled": "Enabled",
+        "action": "Action",
+        "blockMode": "Block Mode",
+        "priority": "Priority (higher = first)",
+        "host": "Host",
+        "hostRegex": "Host Regex",
+        "ip": "IP Address",
+        "cidr": "CIDR",
+        "matchConditions": "Match Conditions"
+      },
+      "actions": {
+        "block": "Block",
+        "bypass": "Bypass",
+        "inspect": "Inspect"
+      },
+      "blockModes": {
+        "displayPage": "Show Blocked Page",
+        "silentDrop": "Silent Drop"
+      },
+      "status": {
+        "saving": "Saving...",
+        "saved": "Saved.",
+        "deleting": "Deleting...",
+        "deleted": "Deleted."
+      },
+      "errors": {
+        "invalidAction": "Action must be block, bypass, or inspect."
+      }
+    }
+  }
+}

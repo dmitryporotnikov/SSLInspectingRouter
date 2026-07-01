@@ -1,0 +1,6 @@
+Value,Description,DTLS-OK,Reference,Comment
+0,uncompressed,Y,[RFC8422],
+1,ansiX962_compressed_prime,Y,[RFC8422],
+2,ansiX962_compressed_char2,Y,[RFC8422],
+3-247,Unassigned,,,
+248-255,Reserved for Private Use,,[RFC8422],

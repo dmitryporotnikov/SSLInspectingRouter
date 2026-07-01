@@ -1,0 +1,382 @@
+{
+  "meta": {
+    "code": "ru",
+    "name": "Russian",
+    "native_name": "Русский"
+  },
+  "strings": {
+    "app": {
+      "title": "SSL Inspecting Router"
+    },
+    "language": {
+      "label": "Язык"
+    },
+    "login": {
+      "eyebrow": "Консоль",
+      "subtitle": "Войдите, чтобы получить доступ к панели управления.",
+      "username": "Имя пользователя",
+      "password": "Пароль",
+      "submit": "Войти",
+      "defaultCredentialsHtml": "Учетка по умолчанию: <code>admin / admin123</code>",
+      "errors": {
+        "required": "Необходимо указать имя пользователя и пароль."
+      }
+    },
+    "nav": {
+      "traffic": "Трафик",
+      "rewrites": "Редактор",
+      "firewall": "Фаервол",
+      "users": "Пользователи"
+    },
+    "sidebar": {
+      "title": "Панель управления",
+      "rulesLoaded": "Загружено правил",
+      "bodyArtifacts": "Артефакты",
+      "dropEntries": "Блокировать",
+      "bypassEntries": "Пропускать",
+      "openRewriteStudio": "Открыть редактор трафика"
+    },
+    "settings": {
+      "title": "Центр управления",
+      "subtitle": "Управление маршрутами в реальном времени и политиками.",
+      "runtime": "Исполнение",
+      "inspection": "Просматривать",
+      "truncateLogBodies": "Короткие логи",
+      "logNothing": "Ничего не логировать",
+      "sniOnlyMode": "Только SNI",
+      "wireguardEgress": "Выход через WireGuard",
+      "torEgress": "Выход через Tor",
+      "bodyArtifacts": "Артефакты",
+      "artifactStoragePath": "Путь для артефактов",
+      "artifactDirectoryPlaceholder": "Каталог артефактов",
+      "setPath": "Задать путь",
+      "wireguardClientConfig": "Конфигурация WireGuard",
+      "wireguardNoteHtml": "Вставьте конфигурацию WireGuard клиента выше. Конфигурация автоматически сохраняется в <code>/etc/wireguard/wg0.conf</code> и применяется при активации туннеля.",
+      "saveWireGuardConfig": "Сохранить конфигурацию WireGuard",
+      "tunnel": "Туннель",
+      "torSection": "Выход через Tor",
+      "torNoteHtml": "Требуется SOCKS-адрес Tor (по умолчанию <code>127.0.0.1:9050</code>).",
+      "torRoute": "Маршрут через Tor",
+      "trafficPolicy": "Политики трафика",
+      "trafficPolicyHint": "По одной записи в строке или через запятую. Поддерживаются домены, IP и CIDR.",
+      "dropList": "Список блокировки",
+      "bypassList": "Список обхода",
+      "savePolicy": "Сохранить политику",
+      "startupProfile": "Профиль роутера",
+      "startupProfileNote": "Только для просмотра. Изменения требуют перезапуска.",
+      "allowQuic": "Разрешить QUIC",
+      "tlsPorts": "Порты TLS",
+      "inspectOnly": "Просматривать только",
+      "pcapPath": "Путь PCAP",
+      "currentEgress": "Текущий выход",
+      "defaultEgress": "Выход по умолчанию",
+      "saving": "Сохранение...",
+      "saved": "Сохранено."
+    },
+    "metrics": {
+      "connectionLabel": "Соединение",
+      "databaseSizeLabel": "Размер базы данных",
+      "capturedRequestsLabel": "Перехваченные запросы"
+    },
+    "actions": {
+      "logout": "Выйти",
+      "refresh": "Обновить",
+      "close": "Закрыть",
+      "edit": "Изменить",
+      "delete": "Удалить",
+      "remove": "Удалить"
+    },
+    "theme": {
+      "light": "светлая",
+      "dark": "темная",
+      "switchTo": "Переключить на тему: {theme}"
+    },
+    "traffic": {
+      "title": "Монитор",
+      "searchPlaceholder": "Поиск по хосту, IP источника, статусу...",
+      "flush": "Очистить",
+      "flushTitle": "Удалить сохраненный трафик",
+      "flushConfirm": "Очистить сохраненный трафик из базы данных и сбросить раздел Трафик?",
+      "flushing": "Очистка...",
+      "request": "Запрос",
+      "response": "Ответ",
+      "detailTitle": "Трафик #{id}",
+      "detailModalTitle": "Инфо по трафику",
+      "empty": "Для этого запроса нет сохраненного трафика.",
+      "summaryEmpty": "0 результатов",
+      "summaryRange": "{start}-{end} из {total} результатов",
+      "modes": {
+        "all": "Все режимы",
+        "inspected": "Просмотрен",
+        "paused": "Просмотр приостановлена",
+        "sni": "Только SNI",
+        "bypassed": "Обход",
+        "blocked": "Заблокировано"
+      },
+      "table": {
+        "time": "Время",
+        "mode": "Режим",
+        "method": "Метод",
+        "host": "Хост",
+        "url": "URL",
+        "source": "Источник",
+        "status": "Статус"
+      }
+    },
+    "pagination": {
+      "previous": "Назад",
+      "next": "Вперед"
+    },
+    "rewrites": {
+      "title": "Редактор правил",
+      "newRule": "Новое правило",
+      "reload": "Перезагрузить",
+      "loadedRules": "Загруженные правила",
+      "saveRule": "Сохранить правило",
+      "deleteRule": "Удалить правило",
+      "cloneToManaged": "Клонировать в управляемые",
+      "newRuleTitle": "Новое правило",
+      "managedRule": "Управляемое правило",
+      "managedRuleNumber": "Управляемое правило #{id}",
+      "readOnlyMode": "Режим только для чтения",
+      "managedFileValue": "управляемый файл: {file}",
+      "managedFileEmpty": "управляемый файл: -",
+      "externalRuleFrom": "Внешнее правило из {file}",
+      "discardUnsavedChanges": "Отменить несохраненные изменения правила?",
+      "deleteConfirm": "Удалить правило \"{name}\"?",
+      "empty": "Правила не загружены.",
+      "badges": {
+        "managed": "Управляемое",
+        "external": "Внешнее"
+      },
+      "actionCount": {
+        "one": "{status} • 1 действие",
+        "other": "{status} • {count} действий"
+      },
+      "fields": {
+        "enabled": "Включено",
+        "ruleName": "Имя правила",
+        "matchHost": "Хост",
+        "matchHostRegex": "Regex хоста",
+        "pathPrefix": "Префикс пути",
+        "pathRegex": "Regex пути",
+        "method": "Метод",
+        "methods": "Методы (через запятую/строку)",
+        "status": "Статус",
+        "statuses": "Статусы (через запятую/строку)",
+        "contentTypeContains": "Content-Type содержит",
+        "contentTypeRegex": "Regex Content-Type",
+        "deleteHeaders": "Удалить заголовки (через запятую/строку)",
+        "requestHeaderContains": "Запрос содержит заголовок",
+        "responseHeaderContains": "Ответ содержит заголовок",
+        "setHeaders": "Установить заголовки",
+        "addHeaders": "Добавить заголовки",
+        "bodyReplace": "Замена тела",
+        "bodyRegexReplace": "Regex-замена тела"
+      },
+      "placeholders": {
+        "headerValue": "Header-Name: value",
+        "replaceBody": "from => to",
+        "replaceBodyRegex": "pattern => replacement"
+      },
+      "labels": {
+        "from": "from",
+        "to": "to",
+        "pattern": "pattern",
+        "replace": "replace"
+      },
+      "errors": {
+        "positiveIntegers": "{label} должны быть положительными целыми числами.",
+        "headerFormat": "Строки поля {label} должны быть в формате \"Header: value\".",
+        "headerNameAndValue": "Строки поля {label} должны содержать и имя заголовка, и значение.",
+        "replacementFormat": "Используйте формат \"{left} => {right}\" для каждой строки.",
+        "valueCannotBeEmpty": "Значение \"{label}\" не может быть пустым.",
+        "ruleNameRequired": "Необходимо указать имя правила.",
+        "statusPositiveInteger": "Статус должен быть положительным целым числом.",
+        "actionRequired": "Требуется хотя бы одно действие перезаписи."
+      },
+      "summary": {
+        "host": "host={value}",
+        "hostRegex": "regex host",
+        "pathPrefix": "path^={value}",
+        "pathRegex": "regex path",
+        "method": "method={value}",
+        "methods": "methods={count}",
+        "status": "status={value}",
+        "statuses": "statuses={count}",
+        "contentTypeContains": "ct~={value}",
+        "contentTypeRegex": "ct regex",
+        "matchesAllResponses": "совпадает со всеми ответами"
+      },
+      "status": {
+        "saving": "Сохранение...",
+        "saved": "Сохранено.",
+        "deleting": "Удаление...",
+        "deleted": "Удалено.",
+        "cloning": "Клонирование...",
+        "cloned": "Склонировано.",
+        "waitingForStableSnapshot": "Ожидание стабильного снимка правил перезаписи...",
+        "refreshFailed": "Не удалось обновить список правил перезаписи. Показан последний загруженный снимок.",
+        "warning": "Предупреждение: {warning}"
+      }
+    },
+    "roles": {
+      "viewer": "Только чтение",
+      "operator": "Оператор",
+      "admin": "Администратор"
+    },
+    "status": {
+      "connected": "Подключено",
+      "disconnected": "Отключено",
+      "enabled": "включено",
+      "disabled": "отключено",
+      "blocked": "заблокировано",
+      "default": "по умолчанию",
+      "allSources": "все источники",
+      "active": "активно",
+      "inactive": "неактивно",
+      "noConfig": "нет конфигурации",
+      "offline": "недоступно"
+    },
+    "session": {
+      "expired": "Сессия истекла. Войдите снова."
+    },
+    "users": {
+      "title": "Управление пользователями",
+      "adminRequired": "Требуются права администратора",
+      "empty": "Пользователи отсутствуют.",
+      "lastLoginNever": "Никогда",
+      "deleteConfirm": "Удалить пользователя {username}?",
+      "state": {
+        "active": "Активен",
+        "disabled": "Отключен"
+      },
+      "table": {
+        "username": "Имя пользователя",
+        "displayName": "Отображаемое имя",
+        "role": "Роль",
+        "state": "Состояние",
+        "lastLogin": "Последний вход"
+      },
+      "form": {
+        "username": "Имя пользователя",
+        "displayName": "Отображаемое имя",
+        "displayNamePlaceholder": "Оператор",
+        "role": "Роль",
+        "password": "Пароль",
+        "passwordPlaceholder": "Минимум 8 символов",
+        "active": "Активен",
+        "cancelEdit": "Отменить редактирование",
+        "createTitle": "Создать пользователя",
+        "editTitle": "Редактировать пользователя: {username}",
+        "submitCreate": "Создать пользователя",
+        "submitUpdate": "Обновить пользователя"
+      }
+    },
+    "wireguard": {
+      "disableTorFirst": "Отключите выход через Tor перед включением WireGuard.",
+      "enabling": "Включение туннеля...",
+      "disabling": "Отключение туннеля...",
+      "enabled": "Туннель WireGuard включен.",
+      "disabled": "Туннель WireGuard отключен.",
+      "savingConfig": "Сохранение конфигурации...",
+      "configSaved": "Конфигурация WireGuard сохранена.",
+      "configSavedApply": "Конфигурация сохранена. Переключите туннель выкл/вкл для применения.",
+      "errors": {
+        "configEmpty": "Конфигурация WireGuard не может быть пустой."
+      }
+    },
+    "tor": {
+      "disableWireGuardFirst": "Отключите выход через WireGuard перед включением Tor.",
+      "enabling": "Включение выхода через Tor...",
+      "disabling": "Отключение выхода через Tor...",
+      "enabled": "Выход через Tor включен.",
+      "disabled": "Выход через Tor отключен."
+    },
+    "artifacts": {
+      "errors": {
+        "directoryEmpty": "Каталог артефактов не может быть пустым."
+      }
+    },
+    "errors": {
+      "networkRequestFailed": "Сетевой запрос не выполнен",
+      "requestFailed": "Запрос завершился ошибкой ({status})"
+    },
+    "firewall": {
+      "title": "Правила фаервола",
+      "modeLabel": "Режим фаервола",
+      "addRule": "Добавить правило",
+      "rules": "Правила",
+      "tabs": {
+        "rules": "Правила",
+        "outbound": "Исходящие порты"
+      },
+      "outbound": {
+        "title": "Исходящие порты",
+        "description": "Ограничьте пересылаемый трафик списком разрешенных портов назначения. Список применяется как iptables allowlist с действием DROP по умолчанию и активен только при включенном режиме фаервола. Список по умолчанию: HTTPS (TCP 443) и DNS (TCP/UDP 53).",
+        "empty": "Исходящие порты не настроены.",
+        "table": {
+          "port": "Порт",
+          "protocol": "Протокол"
+        },
+        "fields": {
+          "port": "Порт",
+          "protocol": "Протокол"
+        },
+        "protocols": {
+          "tcp": "TCP",
+          "udp": "UDP"
+        },
+        "add": "Добавить",
+        "save": "Сохранить исходящие порты",
+        "status": {
+          "saving": "Сохранение...",
+          "saved": "Сохранено."
+        },
+        "errors": {
+          "invalidEntry": "Порт должен быть 1-65535, протокол — TCP или UDP.",
+          "duplicate": "Такая комбинация порта и протокола уже есть в списке."
+        }
+      },
+      "defaultNote": "Режим фаервола применяет только совпадающие правила. HTTP и HTTPS без совпадений продолжают работать обычно.",
+      "empty": "Правила фаервола не настроены.",
+      "newRuleTitle": "Новое правило фаервола",
+      "saveRule": "Сохранить правило",
+      "updateRule": "Обновить правило",
+      "deleteRule": "Удалить правило",
+      "cancelEdit": "Отмена",
+      "deleteConfirm": "Удалить это правило фаервола?",
+      "discardUnsavedChanges": "Отменить несохраненные изменения правила?",
+      "matchAll": "соответствует всему трафику",
+      "fields": {
+        "enabled": "Включено",
+        "action": "Действие",
+        "blockMode": "Режим блокировки",
+        "priority": "Приоритет (выше = первый)",
+        "host": "Хост",
+        "hostRegex": "Regex хоста",
+        "ip": "IP адрес",
+        "cidr": "CIDR",
+        "matchConditions": "Условия соответствия"
+      },
+      "actions": {
+        "block": "Блокировать",
+        "bypass": "Обход",
+        "inspect": "Просмотр"
+      },
+      "blockModes": {
+        "displayPage": "Показать страницу блокировки",
+        "silentDrop": "Тихий сброс"
+      },
+      "status": {
+        "saving": "Сохранение...",
+        "saved": "Сохранено.",
+        "deleting": "Удаление...",
+        "deleted": "Удалено."
+      },
+      "errors": {
+        "invalidAction": "Действие должно быть блокировать, обход или просмотр."
+      }
+    }
+  }
+}

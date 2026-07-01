@@ -1,0 +1,16 @@
+{
+  "name": "example-disabled",
+  "enabled": false,
+  "match": {
+    "content_type_contains": "text/plain"
+  },
+  "actions": {
+    "set_headers": {
+      "X-Debug": "true"
+    },
+    "replace_body": [
+      { "from": "Google", "to": "MyApp" }
+    ]
+  }
+}
+
