@@ -22,6 +22,42 @@ func newTestManager(t *testing.T) *Manager {
 	return m
 }
 
+func TestAppendIngressIfaceInsertsBeforeJump(t *testing.T) {
+	fm := NewFirewallManager(8080, 8443)
+	fm.SetLANInterface("eth1")
+
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "prerouting jump",
+			in:   []string{"-t", "nat", "-A", "PREROUTING", "-j", "SSL_DISPATCH"},
+			want: []string{"-t", "nat", "-A", "PREROUTING", "-i", "eth1", "-j", "SSL_DISPATCH"},
+		},
+		{
+			name: "source match before jump",
+			in:   []string{"-t", "nat", "-A", "SSL_DISPATCH", "-s", "10.0.0.2", "-j", "SSLPROXY"},
+			want: []string{"-t", "nat", "-A", "SSL_DISPATCH", "-s", "10.0.0.2", "-i", "eth1", "-j", "SSLPROXY"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fm.appendIngressIface(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len = %d, want %d: %v", len(got), len(tc.want), got)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("arg %d = %q, want %q (full: %v)", i, got[i], tc.want[i], got)
+				}
+			}
+		})
+	}
+}
+
 func TestOutboundPortsPersistAcrossInitialize(t *testing.T) {
 	db := openTestDB(t)
 	m := &Manager{rules: []Rule{}, nextID: 1}

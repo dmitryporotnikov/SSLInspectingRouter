@@ -626,18 +626,23 @@ func masqueradeRuleForInterface(iface string) []string {
 	}
 }
 
-// appendIngressIface appends `-i <lanInterface>` to an iptables argv slice
-// when a LAN ingress interface is configured. Returns the (possibly new)
-// slice. Callers that mutate the result should not retain references to
-// the original slice.
+// appendIngressIface inserts `-i <lanInterface>` before the jump target
+// when a LAN ingress interface is configured. Match options must precede
+// `-j`; target-specific options, if any, stay after it.
 func (fm *FirewallManager) appendIngressIface(rule []string) []string {
 	if fm.lanInterface == "" {
 		return rule
 	}
 	out := make([]string, 0, len(rule)+2)
-	out = append(out, rule...)
-	out = append(out, "-i", fm.lanInterface)
-	return out
+	for i, arg := range rule {
+		if arg == "-j" {
+			out = append(out, "-i", fm.lanInterface)
+			out = append(out, rule[i:]...)
+			return out
+		}
+		out = append(out, arg)
+	}
+	return append(out, "-i", fm.lanInterface)
 }
 
 // ApplyOutboundPorts toggles the SSL_OUTBOUND chain. When enabled is true
