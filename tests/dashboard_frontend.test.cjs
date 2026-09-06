@@ -7,7 +7,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../internal/dashboard/frontend/app.js"), "utf8")
-    .replace("void bootstrap();", "");
+    .replace(/\bvoid bootstrap\(\);\s*/g, "");
 
 function deferred() {
     let resolve, reject;
