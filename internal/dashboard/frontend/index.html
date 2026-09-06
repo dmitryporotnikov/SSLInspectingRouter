@@ -4,10 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title></title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>SSL Inspecting Router</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 
@@ -77,11 +74,11 @@
                 <button type="button" class="btn btn-ghost" id="view-rules-btn" data-i18n="sidebar.openRewriteStudio"></button>
             </div>
 
-            <section id="settings-panel" class="settings-panel hidden">
-                <div class="settings-header">
+            <details id="settings-panel" class="settings-panel hidden">
+                <summary class="settings-header">
                     <h3 data-i18n="settings.title"></h3>
                     <p data-i18n="settings.subtitle"></p>
-                </div>
+                </summary>
 
                 <div class="settings-group compact-group">
                     <h4 data-i18n="settings.runtime"></h4>
@@ -89,49 +86,49 @@
                         <div class="switch-wrap compact-switch" id="inspection-control-wrap">
                             <span data-i18n="settings.inspection"></span>
                             <label class="switch">
-                                <input type="checkbox" id="inspection-toggle">
+                                <input type="checkbox" id="inspection-toggle" data-i18n-aria-label="settings.inspection">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="truncate-log-wrap">
                             <span data-i18n="settings.truncateLogBodies"></span>
                             <label class="switch">
-                                <input type="checkbox" id="truncate-log-toggle">
+                                <input type="checkbox" id="truncate-log-toggle" data-i18n-aria-label="settings.truncateLogBodies">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="log-nothing-wrap">
                             <span data-i18n="settings.logNothing"></span>
                             <label class="switch">
-                                <input type="checkbox" id="log-nothing-toggle">
+                                <input type="checkbox" id="log-nothing-toggle" data-i18n-aria-label="settings.logNothing">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="sni-only-wrap">
                             <span data-i18n="settings.sniOnlyMode"></span>
                             <label class="switch">
-                                <input type="checkbox" id="sni-only-toggle">
+                                <input type="checkbox" id="sni-only-toggle" data-i18n-aria-label="settings.sniOnlyMode">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="wireguard-wrap">
                             <span data-i18n="settings.wireguardEgress"></span>
                             <label class="switch">
-                                <input type="checkbox" id="wireguard-toggle">
+                                <input type="checkbox" id="wireguard-toggle" data-i18n-aria-label="settings.wireguardEgress">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="tor-wrap">
                             <span data-i18n="settings.torEgress"></span>
                             <label class="switch">
-                                <input type="checkbox" id="tor-toggle">
+                                <input type="checkbox" id="tor-toggle" data-i18n-aria-label="settings.torEgress">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
                             <span data-i18n="settings.bodyArtifacts"></span>
                             <label class="switch">
-                                <input type="checkbox" id="body-artifacts-toggle">
+                                <input type="checkbox" id="body-artifacts-toggle" data-i18n-aria-label="settings.bodyArtifacts">
                                 <span class="slider"></span>
                             </label>
                         </div>
@@ -217,7 +214,7 @@
                         <strong id="default-egress-interface-value" class="meta-value">-</strong>
                     </div>
                 </details>
-            </section>
+            </details>
         </aside>
 
         <main class="main-area">
@@ -257,8 +254,8 @@
                 <div class="section-header">
                     <h3 data-i18n="traffic.title"></h3>
                     <div class="section-actions">
-                        <input type="text" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder">
-                        <select id="traffic-mode-filter">
+                        <input type="search" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder" data-i18n-aria-label="traffic.searchPlaceholder">
+                        <select id="traffic-mode-filter" data-i18n-aria-label="traffic.modeFilterLabel">
                             <option value="" data-i18n="traffic.modes.all"></option>
                             <option value="inspected" data-i18n="traffic.modes.inspected"></option>
                             <option value="paused" data-i18n="traffic.modes.paused"></option>
@@ -266,7 +263,7 @@
                             <option value="bypassed" data-i18n="traffic.modes.bypassed"></option>
                             <option value="blocked" data-i18n="traffic.modes.blocked"></option>
                         </select>
-                        <select id="traffic-limit">
+                        <select id="traffic-limit" data-i18n-aria-label="traffic.pageSizeLabel">
                             <option value="25">25</option>
                             <option value="50" selected>50</option>
                             <option value="100">100</option>
@@ -616,7 +613,7 @@
         </main>
     </div>
 
-    <div id="modal" class="modal hidden">
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-card panel">
             <div class="modal-header">
                 <h4 id="modal-title"></h4>

@@ -1,14 +1,15 @@
 :root {
-    --bg-0: #050b16;
+    color-scheme: dark;
+    --bg-0: #0b1018;
     --bg-1: #0a1526;
     --bg-2: #0d213a;
     --body-radial: #123864;
-    --surface: #102036;
-    --surface-strong: #172b45;
-    --surface-soft: #0d1a2d;
+    --surface: #121a26;
+    --surface-strong: #182231;
+    --surface-soft: #101722;
     --surface-elev: #1a304d;
-    --line: #274364;
-    --line-strong: #37608e;
+    --line: #283344;
+    --line-strong: #3b4b61;
     --text-main: #e8f1ff;
     --text-dim: #98afcc;
     --accent: #4ea0ff;
@@ -17,11 +18,11 @@
     --warn: #f0c46a;
     --danger: #ff8f8f;
     --ok: #57d8a3;
-    --shadow: 0 20px 44px rgba(0, 0, 0, 0.46);
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     --table-head: #13233a;
     --row-hover: #1b2f4c;
     --table-row-line: rgba(53, 84, 121, 0.56);
-    --panel-bg: linear-gradient(180deg, rgba(16, 32, 54, 0.92) 0%, rgba(23, 43, 69, 0.94) 100%);
+    --panel-bg: var(--surface);
     --panel-soft-bg: rgba(16, 32, 54, 0.62);
     --panel-fold-bg: rgba(16, 32, 54, 0.66);
     --panel-item-bg: rgba(14, 28, 47, 0.7);
@@ -48,7 +49,8 @@
 }
 
 body[data-theme="light"] {
-    --bg-0: #eef4fb;
+    color-scheme: light;
+    --bg-0: #f3f5f9;
     --bg-1: #f7fbff;
     --bg-2: #dce9f8;
     --body-radial: #bdd8f9;
@@ -107,11 +109,12 @@ body {
 }
 
 body {
-    font-family: 'Manrope', sans-serif;
+    font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
     color: var(--text-main);
-    background: radial-gradient(circle at 20% 0%, var(--body-radial) 0%, transparent 36%),
-        linear-gradient(170deg, var(--bg-1) 0%, var(--bg-0) 52%, var(--bg-2) 100%);
-    padding: 24px;
+    background: var(--bg-0);
+    padding: 20px;
 }
 
 body.login-mode {
@@ -124,6 +127,7 @@ body[data-i18n-state="loading"] .app-view {
 }
 
 .background-layer {
+    display: none;
     position: fixed;
     inset: 0;
     pointer-events: none;
@@ -145,7 +149,6 @@ body[data-i18n-state="loading"] .app-view {
         radial-gradient(circle at 25% 25%, rgba(78, 160, 255, 0.03) 0%, transparent 25%),
         radial-gradient(circle at 75% 75%, rgba(87, 216, 163, 0.02) 0%, transparent 25%);
     background-size: 60px 60px;
-    animation: bgShift 20s ease-in-out infinite;
     opacity: 0.6;
 }
 
@@ -265,22 +268,10 @@ code {
         radial-gradient(circle at 25% 25%, rgba(78, 160, 255, 0.03) 0%, transparent 25%),
         radial-gradient(circle at 75% 75%, rgba(87, 216, 163, 0.02) 0%, transparent 25%);
     background-size: 60px 60px;
-    animation: bgShift 20s ease-in-out infinite;
     opacity: 0.6;
     z-index: -1;
 }
 
-@keyframes bgShift {
-    0%, 100% { transform: translate(0, 0) scale(1); }
-    25% { transform: translate(-10px, 5px) scale(1.02); }
-    50% { transform: translate(5px, -10px) scale(0.98); }
-    75% { transform: translate(10px, 10px) scale(1.01); }
-}
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at 70% 16%, rgba(78, 160, 255, 0.2), transparent 42%);
-    z-index: -1;
-}
 
 body.login-mode .auth-view {
     min-height: 100vh;
@@ -289,8 +280,7 @@ body.login-mode .auth-view {
 .auth-panel {
     width: min(450px, 96vw);
     padding: 30px;
-    backdrop-filter: blur(10px);
-    background: var(--auth-panel-bg);
+    background: var(--surface);
 }
 
 .auth-panel h1 {
@@ -358,7 +348,7 @@ select:focus {
 }
 
 .btn:hover {
-    transform: translateY(-1px);
+    filter: brightness(1.08);
 }
 
 .btn:active {
@@ -366,7 +356,7 @@ select:focus {
 }
 
 .btn-primary {
-    background: linear-gradient(180deg, #2f8ff8 0%, var(--accent) 100%);
+    background: #2563eb;
     color: #ffffff;
 }
 
@@ -384,9 +374,9 @@ select:focus {
 
 .app-view {
     display: grid;
-    grid-template-columns: 356px 1fr;
+    grid-template-columns: 300px minmax(0, 1fr);
     gap: 18px;
-    height: calc(100vh - 48px);
+    height: calc(100dvh - 40px);
     min-height: 0;
     overflow: hidden;
 }
@@ -414,7 +404,7 @@ select:focus {
 
 .nav-item {
     background: var(--surface-soft);
-    border: 1px solid var(--line-strong);
+    border: 1px solid transparent;
     color: var(--text-main);
     text-align: left;
     padding: 11px 13px;
@@ -427,6 +417,77 @@ select:focus {
     border-color: rgba(31, 110, 212, 0.48);
     background: var(--accent-soft);
     color: var(--accent-strong);
+    box-shadow: inset 3px 0 var(--accent);
+}
+
+.nav-item:hover {
+    background: var(--accent-soft);
+}
+
+:where(button, summary, input, select, textarea, tr[tabindex]):focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+.switch input:focus-visible + .slider {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+
+button:disabled, input:disabled, textarea:disabled, select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.switch:has(input:disabled) {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.settings-panel > summary {
+    cursor: pointer;
+    list-style: none;
+    position: relative;
+    padding-right: 22px;
+}
+
+.settings-panel > summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings-panel > summary::after {
+    content: "+";
+    position: absolute;
+    right: 0;
+    top: 0;
+    color: var(--accent);
+    font-size: 20px;
+}
+
+.settings-panel[open] > summary::after {
+    content: "−";
+}
+
+.settings-panel:not([open]) > summary {
+    margin-bottom: 0;
+}
+
+.sidebar, .table-wrap, .rewrite-list, .firewall-rules-list, .modal-card {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+    overscroll-behavior: contain;
+}
+
+.traffic-table td {
+    font-variant-numeric: tabular-nums;
+}
+
+.traffic-table .host-cell {
+    font-weight: 600;
+}
+
+.traffic-table .url-cell {
+    color: var(--text-dim);
 }
 
 .sidebar-meta {
@@ -591,7 +652,8 @@ select:focus {
 
 .metric-value {
     margin: 4px 0 0;
-    font-size: 1.04rem;
+    font-size: 1.25rem;
+    font-variant-numeric: tabular-nums;
     font-weight: 700;
     color: var(--text-main);
 }
@@ -1240,7 +1302,7 @@ tr:hover td {
     margin: 12px 0;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1000px) {
     body {
         padding: 14px;
     }
@@ -1255,6 +1317,26 @@ tr:hover td {
     .sidebar {
         max-height: calc(100vh - 28px);
         overflow: auto;
+    }
+
+    .nav-list {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 0;
+        gap: 6px;
+    }
+
+    .nav-item {
+        text-align: center;
+        padding: 10px 6px;
+    }
+
+    .sidebar-meta {
+        display: none;
+    }
+
+    .table-wrap {
+        max-height: 65dvh;
+        flex: auto;
     }
 
     .sidebar-meta {
@@ -1275,6 +1357,20 @@ tr:hover td {
 }
 
 @media (max-width: 800px) {
+    .sidebar, .section-view, .topbar {
+        padding: 14px;
+    }
+
+    .status-grid {
+        width: 100%;
+        justify-content: space-between;
+        gap: 12px;
+    }
+
+    .section-actions > * {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
     .auth-panel-header {
         flex-direction: column;
         align-items: stretch;
@@ -1324,6 +1420,14 @@ tr:hover td {
 
     table {
         min-width: 680px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
     }
 }
 

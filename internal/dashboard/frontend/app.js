@@ -60,6 +60,16 @@ const LANGUAGE_KEY = "sir_language";
 const DEFAULT_LOCALE_CODE = "en";
 const CONNECTION_FAILURE_THRESHOLD = 3;
 const CONNECTION_STALE_AFTER_MS = 10000;
+let refreshInFlight = null;
+let mutationRevision = 0;
+let settingsSaving = false;
+let trafficRequestId = 0;
+let trafficSnapshot = "";
+let lastRulesRefreshAt = 0;
+let modalReturnFocus = null;
+
+// A draft belongs to the user until it is successfully saved, even after blur.
+const dirtyFields = new Set();
 
 const dom = {
     languageSelects: Array.from(document.querySelectorAll("[data-language-select]")),
@@ -595,6 +605,10 @@ async function apiRequest(path, options = {}) {
         allowUnauthorized = false,
         trackConnectivity = true,
     } = options;
+    const revision = mutationRevision;
+    if (method !== "GET") mutationRevision++;
+    const controller = new AbortController();
+    const timeout = method === "GET" ? setTimeout(() => controller.abort(), 15000) : null;
 
     const headers = {
         Accept: "application/json",
@@ -607,22 +621,26 @@ async function apiRequest(path, options = {}) {
     }
 
     let response;
+    let payload;
     try {
         response = await fetch(path, {
             method,
             credentials: "include",
             headers,
+            signal: controller.signal,
             body: body !== undefined ? JSON.stringify(body) : undefined,
         });
+        const contentType = response.headers.get("content-type") || "";
+        payload = contentType.includes("application/json") ? await response.json() : null;
     } catch (_error) {
         if (trackConnectivity) {
             reportApiFailure();
         }
         throw new Error(t("errors.networkRequestFailed"));
+    } finally {
+        clearTimeout(timeout);
+        if (method !== "GET") mutationRevision++;
     }
-
-    const contentType = response.headers.get("content-type") || "";
-    const payload = contentType.includes("application/json") ? await response.json().catch(() => null) : null;
 
     if (!response.ok) {
         if (trackConnectivity && response.status >= 500) {
@@ -633,6 +651,13 @@ async function apiRequest(path, options = {}) {
         }
         const error = new Error((payload && payload.error) || t("errors.requestFailed", { status: response.status }));
         error.status = response.status;
+        throw error;
+    }
+
+    // A read started before a write must never roll the visible state back.
+    if (method === "GET" && revision !== mutationRevision) {
+        const error = new Error("Superseded dashboard response");
+        error.name = "SupersededResponse";
         throw error;
     }
 
@@ -685,6 +710,8 @@ function switchSection(section) {
     state.section = section;
     dom.navButtons.forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.section === section);
+        if (btn.dataset.section === section) btn.setAttribute("aria-current", "page");
+        else btn.removeAttribute("aria-current");
     });
 
     dom.trafficSection.classList.toggle("hidden", section !== "traffic");
@@ -693,9 +720,9 @@ function switchSection(section) {
     dom.usersSection.classList.toggle("hidden", section !== "users");
 
     if (section === "rewrites") {
-        renderRewriteEditor();
+        if (!state.rewrites.dirty) renderRewriteEditor();
     } else if (section === "firewall") {
-        renderFirewallTab();
+        if (!state.firewall.dirty) renderFirewallTab();
         renderFirewallSubTab();
     }
 }
@@ -748,6 +775,38 @@ async function bootstrap() {
 }
 
 function bindEvents() {
+    document.querySelectorAll('[id$="save-status"], #policy-save-status, #wireguard-config-status, #tor-status').forEach((element) => {
+        element.setAttribute("role", "status");
+    });
+    [dom.dropListInput, dom.bypassListInput, dom.bodyArtifactsDirectoryInput].forEach((field) => {
+        field.addEventListener("input", () => {
+            dirtyFields.add(field);
+            if (field !== dom.bodyArtifactsDirectoryInput) dom.policySaveStatus.textContent = t("settings.unsaved");
+        });
+    });
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) stopPolling();
+        else if (state.user) {
+            void refreshDashboard(false);
+            startPolling();
+        }
+    });
+    dom.trafficBody.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        const row = event.target.closest("tr[data-id]");
+        if (row) {
+            event.preventDefault();
+            void showTrafficDetail(Number(row.dataset.id));
+        }
+    });
+    document.addEventListener("keydown", (event) => {
+        if (dom.modal.classList.contains("hidden")) return;
+        if (event.key === "Escape") closeModal();
+        if (event.key === "Tab") {
+            event.preventDefault();
+            dom.modalClose.focus();
+        }
+    });
     dom.loginForm.addEventListener("submit", handleLogin);
     dom.languageSelects.forEach((select) => {
         select.addEventListener("change", () => {
@@ -772,9 +831,11 @@ function bindEvents() {
             if (section === "users") {
                 void loadUsers();
             } else if (section === "rewrites") {
-                void loadRewrites({ forceApply: true });
+                void loadRewrites({ preserveForm: state.rewrites.dirty });
             } else if (section === "firewall") {
                 void loadFirewallStatus();
+            } else if (section === "traffic") {
+                void loadTraffic();
             }
         });
     });
@@ -1024,6 +1085,11 @@ async function handleLogout() {
 }
 
 function handleSessionExpired() {
+    dirtyFields.clear();
+    trafficSnapshot = "";
+    lastRulesRefreshAt = 0;
+    trafficRequestId++;
+    closeModal();
     state.user = null;
     state.status = null;
     persistAuthToken(null);
@@ -1049,6 +1115,8 @@ function handleSessionExpired() {
         rules: [],
         selectedRuleId: null,
         dirty: false,
+        activeSubTab: "firewall-rules",
+        outbound: { ports: [], dirty: false },
     };
     state.section = "traffic";
     dom.bodyArtifactsDir.textContent = t("status.disabled");
@@ -1089,24 +1157,45 @@ function handleSessionExpired() {
 
 function startPolling() {
     stopPolling();
-    state.pollHandle = setInterval(() => {
-        void refreshDashboard(false);
+    if (!state.user || document.hidden) return;
+    state.pollHandle = setTimeout(async () => {
+        state.pollHandle = null;
+        await refreshDashboard(false);
+        startPolling();
     }, 3000);
 }
 
 function stopPolling() {
     if (state.pollHandle) {
-        clearInterval(state.pollHandle);
+        clearTimeout(state.pollHandle);
         state.pollHandle = null;
     }
 }
 
 async function refreshDashboard(forceTrafficReload) {
+    if (!state.user || document.hidden) return;
+    if (refreshInFlight) {
+        await refreshInFlight;
+        if (forceTrafficReload) return refreshDashboard(true);
+        return;
+    }
+    dom.refreshBtn.disabled = true;
+    refreshInFlight = refreshDashboardData(forceTrafficReload);
+    try {
+        await refreshInFlight;
+    } finally {
+        refreshInFlight = null;
+        dom.refreshBtn.disabled = false;
+    }
+}
+
+async function refreshDashboardData(forceTrafficReload) {
     const statusTask = loadStatus();
     const policyTask = loadPolicy();
     const firewallTask = state.section === "firewall" ? loadFirewallStatus() : Promise.resolve();
     const trafficTask = state.section === "traffic" || forceTrafficReload ? loadTraffic() : Promise.resolve();
-    const rulesTask = loadRewrites({ preserveForm: state.section === "rewrites" && state.rewrites.dirty });
+    const rulesTask = state.section === "rewrites" || forceTrafficReload || Date.now() - lastRulesRefreshAt >= 30000
+        ? loadRewrites({ preserveForm: state.rewrites.dirty }) : Promise.resolve();
 
     if (isAdmin()) {
         await Promise.allSettled([statusTask, policyTask, firewallTask, trafficTask, rulesTask]);
@@ -1120,9 +1209,10 @@ async function refreshDashboard(forceTrafficReload) {
 }
 
 async function loadStatus() {
+    if (settingsSaving) return;
     try {
         const status = await apiRequest("/api/v1/status");
-        applyStatus(status);
+        if (!settingsSaving) applyStatus(status);
     } catch (_error) {}
 }
 
@@ -1145,7 +1235,7 @@ function applyStatus(status) {
     syncEgressToggleAvailability();
 
     const artifactsDir = String(status.body_artifacts_directory || "").trim();
-    if (document.activeElement !== dom.bodyArtifactsDirectoryInput) {
+    if (!dirtyFields.has(dom.bodyArtifactsDirectoryInput) && document.activeElement !== dom.bodyArtifactsDirectoryInput) {
         dom.bodyArtifactsDirectoryInput.value = artifactsDir;
     }
     if (status.body_artifacts_enabled && artifactsDir !== "") {
@@ -1269,20 +1359,31 @@ function applyPolicy(policy) {
     dom.dropListCount.textContent = String(dropList.length);
     dom.bypassListCount.textContent = String(bypassList.length);
 
-    if (document.activeElement !== dom.dropListInput) {
+    if (!dirtyFields.has(dom.dropListInput) && document.activeElement !== dom.dropListInput) {
         dom.dropListInput.value = formatPolicyEntries(dropList);
     }
-    if (document.activeElement !== dom.bypassListInput) {
+    if (!dirtyFields.has(dom.bypassListInput) && document.activeElement !== dom.bypassListInput) {
         dom.bypassListInput.value = formatPolicyEntries(bypassList);
     }
 }
 
 async function updateDashboardSettings(payload) {
-    const status = await apiRequest("/api/v1/status", {
-        method: "PUT",
-        body: payload,
-    });
-    applyStatus(status);
+    if (settingsSaving) return;
+    settingsSaving = true;
+    const controls = Array.from(dom.settingsPanel.querySelectorAll("input, button, textarea"));
+    const disabled = controls.map((control) => control.disabled);
+    controls.forEach((control) => { control.disabled = true; });
+    dom.settingsPanel.setAttribute("aria-busy", "true");
+    try {
+        const status = await apiRequest("/api/v1/status", { method: "PUT", body: payload });
+        if (payload.body_artifacts_directory !== undefined) dirtyFields.delete(dom.bodyArtifactsDirectoryInput);
+        applyStatus(status);
+    } finally {
+        settingsSaving = false;
+        controls.forEach((control, index) => { control.disabled = disabled[index]; });
+        dom.settingsPanel.removeAttribute("aria-busy");
+        syncEgressToggleAvailability();
+    }
 }
 
 async function updateInspection(enabled) {
@@ -1448,8 +1549,6 @@ async function updateBodyArtifactsDirectory() {
     try {
         await updateDashboardSettings({ body_artifacts_directory: dir });
     } catch (error) {
-        const previous = state.status ? String(state.status.body_artifacts_directory || "") : "";
-        dom.bodyArtifactsDirectoryInput.value = previous;
         alert(error.message);
     }
 }
@@ -1461,6 +1560,8 @@ async function updateTrafficPolicy() {
 
     const dropList = parsePolicyEntries(dom.dropListInput.value);
     const bypassList = parsePolicyEntries(dom.bypassListInput.value);
+    const draftDrop = dom.dropListInput.value;
+    const draftBypass = dom.bypassListInput.value;
 
     dom.policySaveBtn.disabled = true;
     dom.policySaveStatus.textContent = t("settings.saving");
@@ -1473,8 +1574,11 @@ async function updateTrafficPolicy() {
                 bypass_list: bypassList,
             },
         });
+        if (dom.dropListInput.value === draftDrop) dirtyFields.delete(dom.dropListInput);
+        if (dom.bypassListInput.value === draftBypass) dirtyFields.delete(dom.bypassListInput);
         applyPolicy(policy);
-        dom.policySaveStatus.textContent = t("settings.saved");
+        dom.policySaveStatus.textContent = dirtyFields.has(dom.dropListInput) || dirtyFields.has(dom.bypassListInput)
+            ? t("settings.unsaved") : t("settings.saved");
     } catch (error) {
         dom.policySaveStatus.textContent = "";
         alert(error.message);
@@ -1819,6 +1923,7 @@ function beginNewRewrite() {
     if (!isAdmin()) {
         return;
     }
+    if (state.rewrites.dirty && !window.confirm(t("rewrites.discardUnsavedChanges"))) return;
     state.rewrites.selectedKey = "new";
     state.rewrites.dirty = false;
     renderRewriteEditor();
@@ -2064,6 +2169,7 @@ async function loadRewrites(options = {}) {
     const { preserveForm = false, forceApply = false } = options;
     try {
         const response = await apiRequest("/api/v1/rewrites");
+        lastRulesRefreshAt = Date.now();
         const rules = Array.isArray(response.rules) ? response.rules : [];
         const items = Array.isArray(response.items) ? response.items : [];
         const managedFile = String(response.managed_file || "");
@@ -2100,7 +2206,7 @@ async function loadRewrites(options = {}) {
             renderRewriteList();
             dom.rewriteManagedFile.textContent = formatManagedFileLabel(state.rewrites.managedFile);
 
-            if (!preserveForm) {
+            if (!preserveForm && !state.rewrites.dirty) {
                 renderRewriteEditor();
                 state.rewrites.dirty = false;
             }
@@ -2113,6 +2219,7 @@ async function loadRewrites(options = {}) {
         }
         return rules;
     } catch (_error) {
+        if (_error.name === "SupersededResponse") return state.rewrites.rules;
         dom.rewriteSaveStatus.textContent = t("rewrites.status.refreshFailed");
         return state.rewrites.rules;
     }
@@ -2132,8 +2239,14 @@ function trafficQueryString() {
 }
 
 async function loadTraffic() {
+    const requestId = ++trafficRequestId;
+    const query = trafficQueryString();
     try {
-        const response = await apiRequest(`/api/v1/traffic?${trafficQueryString()}`);
+        const response = await apiRequest(`/api/v1/traffic?${query}`);
+        if (requestId !== trafficRequestId || query !== trafficQueryString() || !state.user) return;
+        const snapshot = JSON.stringify([query, response.items, response.total, currentLocaleCode()]);
+        if (snapshot === trafficSnapshot) return;
+        trafficSnapshot = snapshot;
         state.traffic.items = Array.isArray(response.items) ? response.items : [];
         state.traffic.total = Number(response.total || 0);
         renderTraffic();
@@ -2151,6 +2264,7 @@ function renderTraffic() {
             const row = document.createElement("tr");
             row.className = "row-clickable";
             row.dataset.id = String(Number.parseInt(String(entry.id), 10) || 0);
+            row.tabIndex = 0;
 
             const timeCell = document.createElement("td");
             timeCell.textContent = formatTime(entry.timestamp);
@@ -2241,6 +2355,7 @@ async function showTrafficDetail(id) {
 }
 
 function openModal(title, content) {
+    if (dom.modal.classList.contains("hidden")) modalReturnFocus = document.activeElement;
     dom.modalTitle.textContent = title;
     clearElement(dom.modalContent);
     if (content instanceof Node) {
@@ -2249,10 +2364,14 @@ function openModal(title, content) {
         dom.modalContent.textContent = String(content);
     }
     dom.modal.classList.remove("hidden");
+    dom.appView.inert = true;
+    dom.modalClose.focus();
 }
 
 function closeModal() {
     dom.modal.classList.add("hidden");
+    dom.appView.inert = false;
+    if (modalReturnFocus && modalReturnFocus.isConnected) modalReturnFocus.focus();
 }
 
 async function loadUsers() {
@@ -2465,6 +2584,7 @@ async function loadOutboundPorts() {
     if (state.firewall.outbound.dirty) return;
     try {
         const response = await apiRequest("/api/v1/firewall/outbound-ports");
+        if (state.firewall.outbound.dirty) return;
         const ports = Array.isArray(response.ports) ? response.ports : [];
         state.firewall.outbound.ports = ports.map(normalizeOutboundPort).filter(Boolean);
         state.firewall.outbound.dirty = false;
@@ -2563,18 +2683,22 @@ async function saveOutboundPorts() {
     hideOutboundFormError();
     dom.firewallOutboundSaveStatus.textContent = t("firewall.outbound.status.saving");
     dom.firewallOutboundSaveBtn.disabled = true;
+    const savedPorts = JSON.stringify(state.firewall.outbound.ports);
 
     try {
         const response = await apiRequest("/api/v1/firewall/outbound-ports", {
             method: "PUT",
             body: { ports: state.firewall.outbound.ports },
         });
-        state.firewall.outbound.ports = (Array.isArray(response.ports) ? response.ports : [])
-            .map(normalizeOutboundPort)
-            .filter(Boolean);
-        state.firewall.outbound.dirty = false;
+        if (JSON.stringify(state.firewall.outbound.ports) === savedPorts) {
+            state.firewall.outbound.ports = (Array.isArray(response.ports) ? response.ports : [])
+                .map(normalizeOutboundPort)
+                .filter(Boolean);
+            state.firewall.outbound.dirty = false;
+        }
         renderOutboundPortsPane();
-        dom.firewallOutboundSaveStatus.textContent = t("firewall.outbound.status.saved");
+        dom.firewallOutboundSaveStatus.textContent = state.firewall.outbound.dirty
+            ? t("settings.unsaved") : t("firewall.outbound.status.saved");
     } catch (error) {
         dom.firewallOutboundSaveStatus.textContent = "";
         showOutboundFormError(error.message);
@@ -2693,6 +2817,7 @@ function resetFirewallRuleForm() {
 
 function beginNewFirewallRule() {
     if (!isAdmin()) return;
+    if (state.firewall.dirty && !window.confirm(t("firewall.discardUnsavedChanges"))) return;
     state.firewall.selectedRuleId = null;
     state.firewall.dirty = false;
     resetFirewallRuleForm();

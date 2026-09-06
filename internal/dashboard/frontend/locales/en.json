@@ -71,6 +71,7 @@
       "currentEgress": "Current Egress",
       "defaultEgress": "Default Egress",
       "saving": "Saving...",
+      "unsaved": "Unsaved changes",
       "saved": "Saved."
     },
     "metrics": {
@@ -94,6 +95,8 @@
     "traffic": {
       "title": "Traffic Monitor",
       "searchPlaceholder": "Search host, source IP, status...",
+      "modeFilterLabel": "Filter by traffic mode",
+      "pageSizeLabel": "Rows per page",
       "flush": "Flush Traffic",
       "flushTitle": "Delete captured traffic",
       "flushConfirm": "Flush captured traffic from the database and clear the Traffic view?",
