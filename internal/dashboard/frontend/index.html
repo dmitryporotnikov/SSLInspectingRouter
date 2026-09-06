@@ -4,15 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title></title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>SSL Inspecting Router</title>
     <link rel="stylesheet" href="/styles.css">
 </head>
 
 <body class="login-mode" data-i18n-state="loading">
-    <div class="background-layer" aria-hidden="true"></div>
 
     <section id="login-view" class="auth-view">
         <div class="auth-panel panel">
@@ -45,8 +41,8 @@
 
     <div id="app-view" class="app-view hidden">
         <aside class="sidebar panel">
-            <div>
-                <p class="eyebrow">SSLInspectingRouter</p>
+            <div class="brand">
+                <p class="eyebrow"><a class="project-link" href="https://github.com/dmitryporotnikov/SSLInspectingRouter" target="_blank" rel="noopener noreferrer">SSLInspectingRouter</a></p>
                 <h2 data-i18n="sidebar.title"></h2>
             </div>
 
@@ -55,6 +51,7 @@
                 <button type="button" data-section="rewrites" class="nav-item" data-i18n="nav.rewrites"></button>
                 <button type="button" data-section="firewall" class="nav-item" id="firewall-nav" data-i18n="nav.firewall"></button>
                 <button type="button" data-section="users" class="nav-item" id="users-nav" data-i18n="nav.users"></button>
+                <button type="button" data-section="settings" class="nav-item" id="settings-nav" data-i18n="settings.title"></button>
             </nav>
 
             <div class="sidebar-meta">
@@ -77,147 +74,6 @@
                 <button type="button" class="btn btn-ghost" id="view-rules-btn" data-i18n="sidebar.openRewriteStudio"></button>
             </div>
 
-            <section id="settings-panel" class="settings-panel hidden">
-                <div class="settings-header">
-                    <h3 data-i18n="settings.title"></h3>
-                    <p data-i18n="settings.subtitle"></p>
-                </div>
-
-                <div class="settings-group compact-group">
-                    <h4 data-i18n="settings.runtime"></h4>
-                    <div class="control-list">
-                        <div class="switch-wrap compact-switch" id="inspection-control-wrap">
-                            <span data-i18n="settings.inspection"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="inspection-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="truncate-log-wrap">
-                            <span data-i18n="settings.truncateLogBodies"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="truncate-log-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="log-nothing-wrap">
-                            <span data-i18n="settings.logNothing"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="log-nothing-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="sni-only-wrap">
-                            <span data-i18n="settings.sniOnlyMode"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="sni-only-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="wireguard-wrap">
-                            <span data-i18n="settings.wireguardEgress"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="wireguard-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="tor-wrap">
-                            <span data-i18n="settings.torEgress"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="tor-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                        <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
-                            <span data-i18n="settings.bodyArtifacts"></span>
-                            <label class="switch">
-                                <input type="checkbox" id="body-artifacts-toggle">
-                                <span class="slider"></span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <details class="settings-fold" open>
-                    <summary data-i18n="settings.artifactStoragePath"></summary>
-                    <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
-                        <input type="text" id="body-artifacts-directory-input" data-i18n-placeholder="settings.artifactDirectoryPlaceholder">
-                        <button type="button" class="btn btn-ghost" id="body-artifacts-save" data-i18n="settings.setPath"></button>
-                    </div>
-                </details>
-
-                <details class="settings-fold" open>
-                    <summary data-i18n="settings.wireguardClientConfig"></summary>
-                    <p class="muted settings-note" data-i18n-html="settings.wireguardNoteHtml"></p>
-                    <textarea id="wireguard-config-input" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;AllowedIPs = 0.0.0.0/0"></textarea>
-                    <div class="policy-actions">
-                        <button type="button" class="btn btn-ghost" id="wireguard-config-save" data-i18n="settings.saveWireGuardConfig"></button>
-                        <span class="muted" id="wireguard-config-status"></span>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.tunnel"></span>
-                        <strong id="wireguard-meta-value" class="meta-value">-</strong>
-                    </div>
-                </details>
-
-                <details class="settings-fold" open>
-                    <summary data-i18n="settings.torSection"></summary>
-                    <p class="muted settings-note" data-i18n-html="settings.torNoteHtml"></p>
-                    <div class="meta-row">
-                        <span data-i18n="settings.torRoute"></span>
-                        <strong id="tor-meta-value" class="meta-value">-</strong>
-                    </div>
-                    <span class="muted" id="tor-status"></span>
-                </details>
-
-                <details id="policy-controls" class="settings-fold policy-panel">
-                    <summary data-i18n="settings.trafficPolicy"></summary>
-                    <p class="muted policy-hint" data-i18n="settings.trafficPolicyHint"></p>
-                    <div class="policy-grid">
-                        <label>
-                            <span data-i18n="settings.dropList"></span>
-                            <textarea id="drop-list-input" placeholder="example.com&#10;203.0.113.10&#10;10.10.0.0/16"></textarea>
-                        </label>
-                        <label>
-                            <span data-i18n="settings.bypassList"></span>
-                            <textarea id="bypass-list-input" placeholder="internal.example.com&#10;198.51.100.42"></textarea>
-                        </label>
-                    </div>
-                    <div class="policy-actions">
-                        <button type="button" class="btn btn-primary" id="policy-save-btn" data-i18n="settings.savePolicy"></button>
-                        <span class="muted" id="policy-save-status"></span>
-                    </div>
-                </details>
-
-                <details class="settings-fold">
-                    <summary data-i18n="settings.startupProfile"></summary>
-                    <p class="muted settings-note" data-i18n="settings.startupProfileNote"></p>
-                    <div class="meta-row">
-                        <span data-i18n="settings.allowQuic"></span>
-                        <strong id="allow-quic-value">-</strong>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.tlsPorts"></span>
-                        <strong id="tls-ports-value" class="meta-value">-</strong>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.inspectOnly"></span>
-                        <strong id="inspect-only-value" class="meta-value">-</strong>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.pcapPath"></span>
-                        <strong id="pcap-path-value" class="meta-value">-</strong>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.currentEgress"></span>
-                        <strong id="egress-interface-value" class="meta-value">-</strong>
-                    </div>
-                    <div class="meta-row">
-                        <span data-i18n="settings.defaultEgress"></span>
-                        <strong id="default-egress-interface-value" class="meta-value">-</strong>
-                    </div>
-                </details>
-            </section>
         </aside>
 
         <main class="main-area">
@@ -253,12 +109,159 @@
                 </div>
             </header>
 
+            <section id="settings-panel" class="panel section-view settings-panel hidden" aria-labelledby="settings-title">
+                <header class="section-header settings-header">
+                    <div><p class="eyebrow" data-i18n="settings.eyebrow"></p><h3 id="settings-title" data-i18n="settings.title"></h3></div>
+                    <p data-i18n="settings.subtitle"></p>
+                </header>
+                <p id="settings-feedback" class="settings-feedback" role="status"></p>
+                <div class="settings-grid">
+
+                <div class="settings-group compact-group settings-card runtime-card">
+                    <h4 data-i18n="settings.runtime"></h4>
+                    <div class="control-list">
+                        <div class="switch-wrap compact-switch" id="inspection-control-wrap">
+                            <div class="control-copy"><span data-i18n="settings.inspection"></span><small data-i18n="settings.help.inspection"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="inspection-toggle" data-i18n-aria-label="settings.inspection">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="truncate-log-wrap">
+                            <div class="control-copy"><span data-i18n="settings.truncateLogBodies"></span><small data-i18n="settings.help.truncateLogBodies"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="truncate-log-toggle" data-i18n-aria-label="settings.truncateLogBodies">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="log-nothing-wrap">
+                            <div class="control-copy"><span data-i18n="settings.logNothing"></span><small data-i18n="settings.help.logNothing"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="log-nothing-toggle" data-i18n-aria-label="settings.logNothing">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="sni-only-wrap">
+                            <div class="control-copy"><span data-i18n="settings.sniOnlyMode"></span><small data-i18n="settings.help.sniOnlyMode"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="sni-only-toggle" data-i18n-aria-label="settings.sniOnlyMode">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="wireguard-wrap">
+                            <div class="control-copy"><span data-i18n="settings.wireguardEgress"></span><small data-i18n="settings.help.wireguardEgress"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="wireguard-toggle" data-i18n-aria-label="settings.wireguardEgress">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="tor-wrap">
+                            <div class="control-copy"><span data-i18n="settings.torEgress"></span><small data-i18n="settings.help.torEgress"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="tor-toggle" data-i18n-aria-label="settings.torEgress">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="switch-wrap compact-switch" id="body-artifacts-wrap">
+                            <div class="control-copy"><span data-i18n="settings.bodyArtifacts"></span><small data-i18n="settings.help.bodyArtifacts"></small></div>
+                            <label class="switch">
+                                <input type="checkbox" id="body-artifacts-toggle" data-i18n-aria-label="settings.bodyArtifacts">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <details id="policy-controls" class="settings-fold settings-card policy-panel" open>
+                    <summary data-i18n="settings.trafficPolicy"></summary>
+                    <p class="muted policy-hint" data-i18n="settings.trafficPolicyHint"></p>
+                    <div class="policy-grid">
+                        <label>
+                            <span data-i18n="settings.dropList"></span>
+                            <textarea id="drop-list-input" placeholder="example.com&#10;203.0.113.10&#10;10.10.0.0/16"></textarea>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.bypassList"></span>
+                            <textarea id="bypass-list-input" placeholder="internal.example.com&#10;198.51.100.42"></textarea>
+                        </label>
+                    </div>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-primary" id="policy-save-btn" data-i18n="settings.savePolicy"></button>
+                        <span class="muted" id="policy-save-status"></span>
+                    </div>
+                </details>
+                <div class="settings-columns">
+                    <div class="settings-stack">
+                <details class="settings-fold settings-card" open>
+                    <summary data-i18n="settings.artifactStoragePath"></summary>
+                    <div class="artifact-path-wrap" id="body-artifacts-path-wrap">
+                        <input type="text" id="body-artifacts-directory-input" data-i18n-aria-label="settings.artifactStoragePath" data-i18n-placeholder="settings.artifactDirectoryPlaceholder">
+                        <button type="button" class="btn btn-ghost" id="body-artifacts-save" data-i18n="settings.setPath"></button>
+                    </div>
+                </details>
+                <details class="settings-fold settings-card" open>
+                    <summary data-i18n="settings.torSection"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.torNoteHtml"></p>
+                    <div class="meta-row">
+                        <span data-i18n="settings.torRoute"></span>
+                        <strong id="tor-meta-value" class="meta-value">-</strong>
+                    </div>
+                    <span class="muted" id="tor-status"></span>
+                </details>
+                <details class="settings-fold settings-card startup-card">
+                    <summary data-i18n="settings.startupProfile"></summary>
+                    <p class="muted settings-note" data-i18n="settings.startupProfileNote"></p>
+                    <div class="meta-row">
+                        <span data-i18n="settings.allowQuic"></span>
+                        <strong id="allow-quic-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.tlsPorts"></span>
+                        <strong id="tls-ports-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.inspectOnly"></span>
+                        <strong id="inspect-only-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.pcapPath"></span>
+                        <strong id="pcap-path-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.currentEgress"></span>
+                        <strong id="egress-interface-value" class="meta-value">-</strong>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.defaultEgress"></span>
+                        <strong id="default-egress-interface-value" class="meta-value">-</strong>
+                    </div>
+                </details>
+                    </div>
+                    <div class="settings-stack">
+                <details class="settings-fold settings-card" open>
+                    <summary data-i18n="settings.wireguardClientConfig"></summary>
+                    <p class="muted settings-note" data-i18n-html="settings.wireguardNoteHtml"></p>
+                    <textarea id="wireguard-config-input" data-i18n-aria-label="settings.wireguardClientConfig" spellcheck="false" placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = ...&#10;AllowedIPs = 0.0.0.0/0"></textarea>
+                    <div class="policy-actions">
+                        <button type="button" class="btn btn-ghost" id="wireguard-config-save" data-i18n="settings.saveWireGuardConfig"></button>
+                        <span class="muted" id="wireguard-config-status"></span>
+                    </div>
+                    <div class="meta-row">
+                        <span data-i18n="settings.tunnel"></span>
+                        <strong id="wireguard-meta-value" class="meta-value">-</strong>
+                    </div>
+                </details>
+                    </div>
+                </div>
+                </div>
+            </section>
+
             <section id="traffic-section" class="panel section-view">
                 <div class="section-header">
                     <h3 data-i18n="traffic.title"></h3>
                     <div class="section-actions">
-                        <input type="text" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder">
-                        <select id="traffic-mode-filter">
+                        <input type="search" id="traffic-search" data-i18n-placeholder="traffic.searchPlaceholder" data-i18n-aria-label="traffic.searchPlaceholder">
+                        <select id="traffic-mode-filter" data-i18n-aria-label="traffic.modeFilterLabel">
                             <option value="" data-i18n="traffic.modes.all"></option>
                             <option value="inspected" data-i18n="traffic.modes.inspected"></option>
                             <option value="paused" data-i18n="traffic.modes.paused"></option>
@@ -266,7 +269,7 @@
                             <option value="bypassed" data-i18n="traffic.modes.bypassed"></option>
                             <option value="blocked" data-i18n="traffic.modes.blocked"></option>
                         </select>
-                        <select id="traffic-limit">
+                        <select id="traffic-limit" data-i18n-aria-label="traffic.pageSizeLabel">
                             <option value="25">25</option>
                             <option value="50" selected>50</option>
                             <option value="100">100</option>
@@ -616,7 +619,7 @@
         </main>
     </div>
 
-    <div id="modal" class="modal hidden">
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-card panel">
             <div class="modal-header">
                 <h4 id="modal-title"></h4>

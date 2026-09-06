@@ -18,6 +18,10 @@ When `-webtls` is enabled, session cookies are marked `Secure`.
 
 All toggles below are admin-only and take effect without a restart. The values mirror what `GET /api/v1/status` returns.
 
+Choose **Control Center** in the navigation to open its dedicated admin page. Runtime switches include short explanations; policy, storage, WireGuard, Tor, and startup settings have their own cards. The page uses two columns on larger screens and stacks on mobile. Controls are temporarily disabled while a runtime update is being saved, with inline saving, success, or error feedback.
+
+Policy and artifact-directory drafts survive background refreshes and moving focus to another field. Policy changes show **Unsaved changes** until saved; failed directory saves retain the entered path for correction or retry. Drafts are kept in memory only and are cleared when the page reloads or the session ends.
+
 | Toggle | Status field | Effect |
 | --- | --- | --- |
 | Inspection | `inspection_enabled` | Pause/resume TLS MITM. When off, all HTTPS tunnels and is logged as `INSPECTION PAUSED`. |
@@ -44,6 +48,10 @@ The traffic table is filterable by:
 * Mode filter: `all`, `inspected`, `paused` (inspection paused), `sni` (SNI-only), `bypassed`, `blocked`
 
 Click any row to open a detail view with the full request/response.
+
+Keyboard users can focus a row and press Enter or Space to open it, then Escape to close the dialog. Focus returns to the row if it is still present.
+
+Automatic refresh waits three seconds after the previous refresh finishes, avoiding overlapping refresh cycles on slower routers. It pauses while the browser tab is hidden and resumes when visible. Search and pagination ignore older responses that arrive late, and unchanged traffic results do not rebuild the table. Use **Refresh** for an immediate update.
 
 ## Rewrite Policy Studio
 
@@ -74,3 +82,9 @@ Admin-only. Manage accounts, roles, and passwords. The first user is seeded from
 ## Localized UI
 
 The dashboard is localized. A language picker is on the login screen and the top bar. Available languages are discovered from the embedded locale bundles; see [Localization](../LOCALIZATION_CONTRIBUTING.md) for how to add one.
+
+The dashboard uses local system fonts without contacting an external font service. Both themes support visible keyboard focus and reduced-motion preferences. New labels fall back to English where a locale has not supplied a translation.
+
+## Frontend regression checks
+
+Run `node --test tests/dashboard_frontend.test.cjs` with Node.js 18 or later. These dependency-free tests exercise draft preservation, request ordering, refresh coalescing, and failed-save recovery. Run `go test ./...` on Linux for the server suite. Frontend changes are embedded in the Go binary, so rebuild and restart the router to serve them.
