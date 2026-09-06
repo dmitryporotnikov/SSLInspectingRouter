@@ -18,7 +18,7 @@ When `-webtls` is enabled, session cookies are marked `Secure`.
 
 All toggles below are admin-only and take effect without a restart. The values mirror what `GET /api/v1/status` returns.
 
-Expand **Control Center** in the sidebar to access runtime settings. It starts collapsed to leave more room for navigation, particularly on smaller screens. Controls are temporarily disabled while a runtime update is being saved.
+Choose **Control Center** in the navigation to open its dedicated admin page. Runtime switches include short explanations; policy, storage, WireGuard, Tor, and startup settings have their own cards. The page uses two columns on larger screens and stacks on mobile. Controls are temporarily disabled while a runtime update is being saved, with inline saving, success, or error feedback.
 
 Policy and artifact-directory drafts survive background refreshes and moving focus to another field. Policy changes show **Unsaved changes** until saved; failed directory saves retain the entered path for correction or retry. Drafts are kept in memory only and are cleared when the page reloads or the session ends.
 

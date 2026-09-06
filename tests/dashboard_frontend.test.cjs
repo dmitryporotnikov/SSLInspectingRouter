@@ -28,7 +28,8 @@ function dashboard() {
                 setAttribute() {}, removeAttribute() {}, focus() {},
                 classList: {
                     add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
-                    contains(name) { return classes.has(name); }, toggle() {},
+                    contains(name) { return classes.has(name); },
+                    toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
                 },
             });
         }
@@ -57,6 +58,20 @@ test("policy drafts survive blur and polling while untouched fields update", () 
     run('applyPolicy({drop_list: ["old.example"], bypass_list: ["new.example"]})');
     assert.equal(element("drop-list-input").value, "draft.example");
     assert.equal(element("bypass-list-input").value, "new.example");
+});
+
+test("Control Center is a separate admin page and preserves drafts across navigation", () => {
+    const { run, element } = dashboard();
+    element("drop-list-input").value = "draft.example";
+    run('switchSection("settings")');
+    assert.equal(element("settings-panel").classList.contains("hidden"), false);
+    assert.equal(element("traffic-section").classList.contains("hidden"), true);
+    run('switchSection("traffic")');
+    assert.equal(element("settings-panel").classList.contains("hidden"), true);
+    assert.equal(element("drop-list-input").value, "draft.example");
+    run('state.user = {role: "viewer"}; switchSection("settings")');
+    assert.equal(run("state.section"), "traffic");
+    assert.equal(element("settings-panel").classList.contains("hidden"), true);
 });
 
 test("policy edits made during a save remain unsaved drafts", async () => {

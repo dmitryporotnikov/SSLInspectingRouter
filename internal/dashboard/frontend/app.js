@@ -123,6 +123,8 @@ const dom = {
     themeToggle: document.getElementById("theme-toggle"),
     themeToggleIcon: document.getElementById("theme-toggle-icon"),
     settingsPanel: document.getElementById("settings-panel"),
+    settingsNav: document.getElementById("settings-nav"),
+    settingsFeedback: document.getElementById("settings-feedback"),
     inspectionControlWrap: document.getElementById("inspection-control-wrap"),
     inspectionToggle: document.getElementById("inspection-toggle"),
     truncateLogWrap: document.getElementById("truncate-log-wrap"),
@@ -693,11 +695,12 @@ function applyUserContext() {
     const admin = isAdmin();
     dom.usersNav.classList.toggle("hidden", !admin);
     dom.firewallNav.classList.toggle("hidden", !admin);
-    dom.settingsPanel.classList.toggle("hidden", !admin);
+    dom.settingsNav.classList.toggle("hidden", !admin);
+    dom.settingsPanel.classList.toggle("hidden", !admin || state.section !== "settings");
     dom.bodyArtifactsMeta.classList.toggle("hidden", !admin);
     dom.flushTrafficBtn.disabled = !admin;
     dom.flushTrafficBtn.title = admin ? t("traffic.flushTitle") : t("users.adminRequired");
-    if (!admin && state.section === "users") {
+    if (!admin && (state.section === "users" || state.section === "settings")) {
         switchSection("traffic");
     } else if (!admin && state.section === "firewall") {
         switchSection("traffic");
@@ -707,6 +710,7 @@ function applyUserContext() {
 }
 
 function switchSection(section) {
+    if (!isAdmin() && ["settings", "users", "firewall"].includes(section)) section = "traffic";
     state.section = section;
     dom.navButtons.forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.section === section);
@@ -718,6 +722,7 @@ function switchSection(section) {
     dom.rewritesSection.classList.toggle("hidden", section !== "rewrites");
     dom.firewallSection.classList.toggle("hidden", section !== "firewall");
     dom.usersSection.classList.toggle("hidden", section !== "users");
+    dom.settingsPanel.classList.toggle("hidden", section !== "settings");
 
     if (section === "rewrites") {
         if (!state.rewrites.dirty) renderRewriteEditor();
@@ -824,7 +829,7 @@ function bindEvents() {
     dom.navButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
             const section = btn.dataset.section;
-            if (!isAdmin() && (section === "users" || section === "firewall")) {
+            if (!isAdmin() && (section === "users" || section === "firewall" || section === "settings")) {
                 return;
             }
             switchSection(section);
@@ -1374,10 +1379,17 @@ async function updateDashboardSettings(payload) {
     const disabled = controls.map((control) => control.disabled);
     controls.forEach((control) => { control.disabled = true; });
     dom.settingsPanel.setAttribute("aria-busy", "true");
+    dom.settingsFeedback.classList.remove("error");
+    dom.settingsFeedback.textContent = t("settings.saving");
     try {
         const status = await apiRequest("/api/v1/status", { method: "PUT", body: payload });
         if (payload.body_artifacts_directory !== undefined) dirtyFields.delete(dom.bodyArtifactsDirectoryInput);
         applyStatus(status);
+        dom.settingsFeedback.textContent = t("settings.saved");
+    } catch (error) {
+        dom.settingsFeedback.classList.add("error");
+        dom.settingsFeedback.textContent = error.message;
+        throw error;
     } finally {
         settingsSaving = false;
         controls.forEach((control, index) => { control.disabled = disabled[index]; });

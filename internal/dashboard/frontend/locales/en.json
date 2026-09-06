@@ -37,6 +37,16 @@
       "openRewriteStudio": "Open Rewrite Studio"
     },
     "settings": {
+      "eyebrow": "Router configuration",
+      "help": {
+        "inspection": "Inspect HTTPS traffic and apply response rewrites.",
+        "truncateLogBodies": "Limit stored request and response bodies to 4 KB.",
+        "logNothing": "Pause traffic logging and body artifact capture.",
+        "sniOnlyMode": "Observe TLS metadata without decrypting connections.",
+        "wireguardEgress": "Route traffic through your configured WireGuard tunnel.",
+        "torEgress": "Route traffic through Tor. Disable WireGuard first.",
+        "bodyArtifacts": "Save binary response bodies to the directory below."
+      },
       "title": "Control Center",
       "subtitle": "Live routing controls and policy management.",
       "runtime": "Runtime",
