@@ -16,7 +16,24 @@ A transparent interception proxy for HTTP and HTTPS traffic on Linux. It redirec
 - Drop / bypass lists by FQDN, IP, or CIDR; allowlist mode for source IPs
 - **Firewall mode** with host-based rules and an iptables-enforced **outbound port allowlist** (default: HTTPS + DNS)
 
-![Preview](demo.png)
+## Dashboard preview
+
+Inspect captured traffic, manage rewrite and firewall rules, and adjust runtime settings from one console.
+
+[![Control Center with runtime inspection controls and traffic policy settings](screenshots/control-center.jpg)](screenshots/control-center.jpg)
+
+<details>
+<summary>More screenshots: traffic details, rewrites, firewall, and sign-in</summary>
+
+Click a screenshot to view it at full size.
+
+| Traffic details | Rewrite Policy Studio |
+| --- | --- |
+| [![Captured HTTP request and response details](screenshots/traffic-details.jpg)](screenshots/traffic-details.jpg) | [![Response rewrite rule editor](screenshots/rewrite-studio.jpg)](screenshots/rewrite-studio.jpg) |
+| **Firewall rules** | **Sign-in** |
+| [![Firewall rule editor with host matching and block actions](screenshots/firewall.jpg)](screenshots/firewall.jpg) | [![Dashboard sign-in screen](screenshots/login.jpg)](screenshots/login.jpg) |
+
+</details>
 
 > **⚠️ Security:** This tool performs TLS interception by default. Use it only on networks you own and control, and change the default `admin / admin123` credentials before exposing the dashboard.
 
