@@ -71,10 +71,10 @@ func TestContentTypeKnown(t *testing.T) {
 
 func TestALPNKnown(t *testing.T) {
 	cases := map[string]string{
-		"h2":     "HTTP/2 over TLS",
-		"h2c":    "HTTP/2 over TCP",
+		"h2":       "HTTP/2 over TLS",
+		"h2c":      "HTTP/2 over TCP",
 		"http/1.1": "HTTP/1.1",
-		"spdy/3": "SPDY/3",
+		"spdy/3":   "SPDY/3",
 	}
 	for proto, want := range cases {
 		if got := ALPN(proto); got != want {

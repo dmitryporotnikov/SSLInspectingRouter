@@ -12,14 +12,14 @@ import (
 
 func TestIsTransientSQLiteBusyError(t *testing.T) {
 	cases := map[error]bool{
-		nil:                                                   false,
-		errors.New("database is locked"):                      true,
-		errors.New("database table is locked"):                true,
-		errors.New("database is busy"):                        true,
-		errors.New("sql logic error: database is locked"):     true,
+		nil:                                    false,
+		errors.New("database is locked"):       true,
+		errors.New("database table is locked"): true,
+		errors.New("database is busy"):         true,
+		errors.New("sql logic error: database is locked"):      true,
 		errors.New("UNIQUE constraint failed: Users.username"): false,
-		errors.New("syntax error near 'FOO'"):                 false,
-		errors.New("attempt to write a readonly database"):    false, // also contains "database" — must NOT be 503
+		errors.New("syntax error near 'FOO'"):                  false,
+		errors.New("attempt to write a readonly database"):     false, // also contains "database" — must NOT be 503
 	}
 	for err, want := range cases {
 		if got := isTransientSQLiteBusyError(err); got != want {
