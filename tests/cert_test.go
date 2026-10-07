@@ -1,9 +1,9 @@
 package tests
 
 import (
+	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
 	"net"
 	"os"
-	"github.com/dmitryporotnikov/sslinspectingrouter/internal/cert"
 	"testing"
 )
 

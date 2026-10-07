@@ -35,7 +35,7 @@ func TestRewriteEngine_HeaderAndBody(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/hello", nil)
 	h := http.Header{
-		"Content-Type":     []string{"text/plain"},
+		"Content-Type":      []string{"text/plain"},
 		"Transfer-Encoding": []string{"chunked"},
 	}
 

@@ -29,4 +29,3 @@ func shouldSkipBodyTampering(statusCode int, h http.Header) bool {
 
 	return false
 }
-

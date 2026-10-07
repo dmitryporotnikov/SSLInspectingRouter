@@ -95,11 +95,11 @@ func compileRule(rule Rule, fallbackName string) (compiledRule, error) {
 	}
 
 	cm := compiledMatch{
-		host:               strings.ToLower(strings.TrimSpace(rule.Match.Host)),
-		pathPrefix:         strings.TrimSpace(rule.Match.PathPrefix),
+		host:                strings.ToLower(strings.TrimSpace(rule.Match.Host)),
+		pathPrefix:          strings.TrimSpace(rule.Match.PathPrefix),
 		contentTypeContains: strings.ToLower(strings.TrimSpace(rule.Match.ContentTypeContains)),
-		reqHeaderContains:  make(map[string]string),
-		respHeaderContains: make(map[string]string),
+		reqHeaderContains:   make(map[string]string),
+		respHeaderContains:  make(map[string]string),
 	}
 
 	if v := strings.TrimSpace(rule.Match.HostRegex); v != "" {
@@ -249,4 +249,3 @@ func compileRule(rule Rule, fallbackName string) (compiledRule, error) {
 		bodyOps:   bodyOps,
 	}, nil
 }
-

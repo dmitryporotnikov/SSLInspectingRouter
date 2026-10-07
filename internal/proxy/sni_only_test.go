@@ -88,8 +88,8 @@ func buildClientHello(sni string, ciphers []uint16, alpn []string, extraExts map
 	body.WriteByte(0) // session_id length
 	binary.Write(&body, binary.BigEndian, csLen)
 	body.Write(csBytes.Bytes())
-	body.WriteByte(1)  // compression methods length
-	body.WriteByte(0)  // null compression
+	body.WriteByte(1) // compression methods length
+	body.WriteByte(0) // null compression
 	binary.Write(&body, binary.BigEndian, uint16(exts.Len()))
 	body.Write(exts.Bytes())
 
